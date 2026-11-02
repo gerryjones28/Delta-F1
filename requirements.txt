@@ -1,0 +1,20 @@
+# DeltaTrace - initial development dependencies
+# Install with: .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# HTTP client for the OpenF1 REST API
+requests>=2.32,<3
+
+# DataFrame handling for CSV sources and later transformations
+pandas>=2.2,<3
+
+# PostgreSQL driver (binary wheel, no local build tools required)
+psycopg[binary]>=3.2,<4
+
+# SQL toolkit / engine used for later loading work
+SQLAlchemy>=2.0,<3
+
+# Loads PostgreSQL settings from .env
+python-dotenv>=1.0,<2
+
+# Test runner
+pytest>=8.0,<9
