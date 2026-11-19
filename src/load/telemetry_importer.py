@@ -1,8 +1,9 @@
 """Import 2025 Belgian Grand Prix qualifying telemetry into PostgreSQL.
 
-Scope: the *regular qualifying session* of the 2025 Belgian Grand Prix at Spa
-(TracingInsights archive, F1DB race 1138, OpenF1 session 9935). Nothing else is
-read or written.
+Scope: one regular qualifying session per run. The defaults point at the 2025
+Belgian Grand Prix at Spa (TracingInsights archive, F1DB race 1138, OpenF1 session
+9935); --race-id / --session-key / --session-dir select another 2025 event.
+Practice, sprint and race sessions are never read or written.
 
 What one run does
 -----------------
@@ -49,6 +50,8 @@ import math
 import os
 import re
 import sys
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import psycopg
@@ -62,12 +65,45 @@ if __package__ in (None, ""):  # allow `python src/load/telemetry_importer.py`
 from src.paths import PROJECT_ROOT
 
 ARCHIVE_ROOT = PROJECT_ROOT / "data/external/tracinginsights-2025"
-SESSION_DIR = ARCHIVE_ROOT / "Belgian Grand Prix/Qualifying"
 F1DB_DIR = PROJECT_ROOT / "data/raw/f1db-csv"
 
-RACE_ID = 1138          # F1DB 2025 Belgian Grand Prix
-SESSION_KEY = 9935      # OpenF1 qualifying session key
+# Defaults describe the 2025 Belgian Grand Prix, so every existing command keeps
+# working unchanged. Override them with --race-id / --session-key / --session-dir.
+DEFAULT_RACE_ID = 1138          # F1DB race id
+DEFAULT_SESSION_KEY = 9935      # OpenF1 regular qualifying session key
+DEFAULT_SESSION_DIR = "Belgian Grand Prix/Qualifying"
 SESSION_TYPE = "Qualifying"
+
+
+@dataclass(frozen=True)
+class Target:
+    """Which qualifying session a run is about."""
+
+    race_id: int
+    session_key: int
+    session_dir: Path
+    event_name: str
+
+    @property
+    def label(self) -> str:
+        return f"{self.event_name} {SESSION_TYPE}"
+
+
+def build_target(race_id: int, session_key: int, session_dir: str) -> Target:
+    """Resolve and sanity-check the session folder; the event name is its parent."""
+    path = Path(session_dir)
+    if not path.is_absolute():
+        path = ARCHIVE_ROOT / path
+    if not path.is_dir():
+        raise SourceError(f"session directory not found: {path}")
+    if not (path / "drivers.json").is_file():
+        raise SourceError(f"{path} has no drivers.json")
+    return Target(
+        race_id=race_id,
+        session_key=session_key,
+        session_dir=path,
+        event_name=path.parent.name,
+    )
 
 # JSON channel -> telemetry_samples column, in insert order.
 CHANNEL_MAP = (
@@ -157,8 +193,8 @@ def connect(database_url: str) -> psycopg.Connection:
 # ---------------------------------------------------------------------------
 # Source discovery and driver identity
 # ---------------------------------------------------------------------------
-def load_archive_drivers() -> list[dict]:
-    path = SESSION_DIR / "drivers.json"
+def load_archive_drivers(session_dir: Path) -> list[dict]:
+    path = session_dir / "drivers.json"
     if not path.is_file():
         raise SourceError(f"missing {path}")
     with open(path, encoding="utf-8") as handle:
@@ -169,7 +205,7 @@ def load_archive_drivers() -> list[dict]:
     return drivers
 
 
-def load_f1db_grid(race_id: int = RACE_ID) -> dict[int, dict]:
+def load_f1db_grid(race_id: int = DEFAULT_RACE_ID) -> dict[int, dict]:
     """F1DB qualifying classification for the race, keyed by car number."""
     path = F1DB_DIR / "f1db-races-qualifying-results.csv"
     if not path.is_file():
@@ -203,6 +239,85 @@ def load_f1db_driver_names() -> dict[str, dict]:
     }
 
 
+def normalise(value: object) -> str:
+    """Lower-case and strip punctuation, for tolerant circuit-name comparison."""
+    return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+
+def load_f1db_race(race_id: int) -> dict:
+    """Race metadata (year, round, date, circuit) for one F1DB race id."""
+    path = F1DB_DIR / "f1db-races.csv"
+    if not path.is_file():
+        raise SourceError(f"missing {path}")
+    frame = pd.read_csv(path)
+    subset = frame[frame["id"] == race_id]
+    if subset.empty:
+        raise SourceError(f"F1DB has no race with id {race_id}")
+    if len(subset) > 1:
+        raise ValidationError(f"F1DB has {len(subset)} rows for race id {race_id}")
+    row = subset.iloc[0]
+    return {
+        "year": int(row["year"]),
+        "round": int(row["round"]),
+        "date": str(row["date"])[:10],
+        "circuit": str(row["circuitId"]),
+        "grand_prix_id": str(row["grandPrixId"]),
+    }
+
+
+def fetch_openf1_session(session_key: int, race: dict) -> dict:
+    """Look up one OpenF1 session and cross-check it against the F1DB race.
+
+    Only the regular qualifying session is accepted: sprint qualifying, races and
+    practice sessions are rejected here rather than silently imported.
+    """
+    from src.extract.openf1_client import OpenF1Client, OpenF1Error  # lazy: only needed for new events
+
+    try:
+        with OpenF1Client(timeout=30) as client:
+            records = client.get_records("sessions", {"session_key": session_key})
+    except OpenF1Error as exc:
+        raise ValidationError(f"OpenF1 lookup for session {session_key} failed: {exc}") from exc
+
+    if len(records) != 1:
+        raise ValidationError(f"OpenF1 returned {len(records)} sessions for key {session_key}")
+    record = records[0]
+
+    name = record.get("session_name")
+    if name != SESSION_TYPE:
+        raise ValidationError(
+            f"OpenF1 session {session_key} is {name!r}, not {SESSION_TYPE!r} "
+            "(sprint qualifying is deliberately excluded)"
+        )
+    if int(record.get("year", 0)) != race["year"]:
+        raise ValidationError(
+            f"OpenF1 session {session_key} is from {record.get('year')}, "
+            f"F1DB race is {race['year']}"
+        )
+    if normalise(record.get("circuit_short_name")) != normalise(race["circuit"]):
+        raise ValidationError(
+            f"OpenF1 session {session_key} is at {record.get('circuit_short_name')!r} but the "
+            f"F1DB race is at {race['circuit']!r} - refusing to guess"
+        )
+
+    session_date = str(record.get("date_start"))[:10]
+    gap = (date.fromisoformat(race["date"]) - date.fromisoformat(session_date)).days
+    if not 0 <= gap <= 4:
+        raise ValidationError(
+            f"OpenF1 session date {session_date} is {gap} day(s) before the F1DB race "
+            f"date {race['date']}"
+        )
+
+    return {
+        "meeting_key": int(record["meeting_key"]),
+        "session_date": session_date,
+        "session_name": name,
+        "circuit": record.get("circuit_short_name"),
+        "country": record.get("country_name"),
+        "date_start": record.get("date_start"),
+    }
+
+
 def resolve_identities(archive_drivers: list[dict], grid: dict[int, dict],
                        names: dict[str, dict]) -> list[dict]:
     """Map archive driver codes to F1DB ids by car number; the code is a cross-check."""
@@ -223,7 +338,7 @@ def resolve_identities(archive_drivers: list[dict], grid: dict[int, dict],
         grid_row = grid.get(number)
         if grid_row is None:
             problems.append(
-                f"{code} (car {number}): no F1DB entry with that car number in race {RACE_ID}"
+                f"{code} (car {number}): no F1DB qualifying entry with that car number"
             )
             continue
 
@@ -254,9 +369,9 @@ def resolve_identities(archive_drivers: list[dict], grid: dict[int, dict],
     return identities
 
 
-def load_laptimes(code: str) -> list[dict]:
+def load_laptimes(session_dir: Path, code: str) -> list[dict]:
     """Lap metadata from the archive's ``laptimes.json``; missing values stay None."""
-    path = SESSION_DIR / code / "laptimes.json"
+    path = session_dir / code / "laptimes.json"
     if not path.is_file():
         raise SourceError(f"missing {path}")
     with open(path, encoding="utf-8") as handle:
@@ -282,8 +397,8 @@ def load_laptimes(code: str) -> list[dict]:
     return laps
 
 
-def telemetry_path(code: str, lap_number: int) -> Path:
-    return SESSION_DIR / code / f"{lap_number}_tel.json"
+def telemetry_path(session_dir: Path, code: str, lap_number: int) -> Path:
+    return session_dir / code / f"{lap_number}_tel.json"
 
 
 def load_telemetry(path: Path) -> dict[str, list]:
@@ -464,17 +579,28 @@ ROW_TEMPLATE = sql.SQL("({})").format(
 )
 
 
-def resolve_event(conn: psycopg.Connection, race_id: int = RACE_ID) -> int:
+EVENT_COLUMNS = (
+    "f1db_race_id",
+    "openf1_meeting_key",
+    "year",
+    "round",
+    "event_name",
+    "circuit_f1db_id",
+    "event_date",
+)
+
+
+def lookup_event(conn: psycopg.Connection, race_id: int) -> int | None:
     with conn.cursor() as cur:
         cur.execute("SELECT event_id FROM events WHERE f1db_race_id = %s", (race_id,))
         row = cur.fetchone()
-    if row is None:
-        raise ValidationError(f"no events row with f1db_race_id={race_id}")
-    return row[0]
+    return row[0] if row else None
 
 
-def resolve_session(conn: psycopg.Connection, event_id: int,
-                    session_key: int = SESSION_KEY) -> int:
+def lookup_session(conn: psycopg.Connection, event_id: int | None,
+                   session_key: int) -> int | None:
+    if event_id is None:
+        return None
     with conn.cursor() as cur:
         cur.execute(
             "SELECT session_id FROM sessions "
@@ -482,11 +608,64 @@ def resolve_session(conn: psycopg.Connection, event_id: int,
             (event_id, session_key, SESSION_TYPE),
         )
         row = cur.fetchone()
-    if row is None:
-        raise ValidationError(
-            f"no {SESSION_TYPE} session for event {event_id} with OpenF1 key {session_key}"
+    return row[0] if row else None
+
+
+def ensure_event(conn: psycopg.Connection, target: Target, race: dict,
+                 openf1: dict | None, write: bool) -> tuple[int | None, str, dict]:
+    """Resolve the events row for this F1DB race, creating it only when writing."""
+    event_id = lookup_event(conn, target.race_id)
+    if event_id is not None:
+        return event_id, "existing", {}
+
+    values = {
+        "f1db_race_id": target.race_id,
+        "openf1_meeting_key": (openf1 or {}).get("meeting_key"),
+        "year": race["year"],
+        "round": race["round"],
+        "event_name": target.event_name,
+        "circuit_f1db_id": race["circuit"],
+        "event_date": race["date"],
+    }
+    if not write:
+        return None, "would insert", values
+    if values["openf1_meeting_key"] is None:
+        raise ValidationError("cannot create the events row without an OpenF1 meeting key")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO events (" + ", ".join(EVENT_COLUMNS) + ") VALUES ("
+            + ", ".join(["%s"] * len(EVENT_COLUMNS)) + ") RETURNING event_id",
+            tuple(values[column] for column in EVENT_COLUMNS),
         )
-    return row[0]
+        return cur.fetchone()[0], "inserted", values
+
+
+def ensure_session(conn: psycopg.Connection, target: Target, event_id: int | None,
+                   openf1: dict | None, write: bool) -> tuple[int | None, str, dict]:
+    """Resolve the qualifying session row, creating it only when writing."""
+    session_id = lookup_session(conn, event_id, target.session_key)
+    if session_id is not None:
+        return session_id, "existing", {}
+
+    values = {
+        "event_id": event_id,
+        "openf1_session_key": target.session_key,
+        "session_type": SESSION_TYPE,
+        "session_date": (openf1 or {}).get("session_date"),
+    }
+    if not write or event_id is None:
+        return None, "would insert", values
+    if values["session_date"] is None:
+        raise ValidationError("cannot create the sessions row without an OpenF1 session date")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO sessions (event_id, openf1_session_key, session_type, session_date) "
+            "VALUES (%s, %s, %s, %s) RETURNING session_id",
+            (event_id, target.session_key, SESSION_TYPE, values["session_date"]),
+        )
+        return cur.fetchone()[0], "inserted", values
 
 
 def ensure_driver(conn: psycopg.Connection, identity: dict) -> tuple[int, str]:
@@ -640,7 +819,7 @@ def session_counts(conn: psycopg.Connection, session_id: int) -> dict[str, dict[
 # Planning and reporting
 # ---------------------------------------------------------------------------
 def build_plan(identities: list[dict], lap_targets: set[tuple[str, int]] | None,
-               limit: int | None) -> tuple[list[dict], list[tuple[str, int, list[str]]]]:
+               limit: int | None, session_dir: Path) -> tuple[list[dict], list[tuple[str, int, list[str]]]]:
     """Read every candidate lap, validate it and classify it.
 
     Returns (plan, skipped) where each plan item carries the lap metadata to
@@ -654,7 +833,7 @@ def build_plan(identities: list[dict], lap_targets: set[tuple[str, int]] | None,
     for identity in identities:
         code = identity["code"]
         item = {"identity": identity, "laps": [], "eligible": [], "skips": [], "samples": 0}
-        for meta in load_laptimes(code):
+        for meta in load_laptimes(session_dir, code):
             if lap_targets is not None and (code, meta["lap_number"]) not in lap_targets:
                 continue
             if limit is not None and processed >= limit:
@@ -666,7 +845,7 @@ def build_plan(identities: list[dict], lap_targets: set[tuple[str, int]] | None,
                 item["skips"].append((meta["lap_number"], ["no recorded lap duration"]))
                 continue
 
-            telemetry = load_telemetry(telemetry_path(code, meta["lap_number"]))
+            telemetry = load_telemetry(telemetry_path(session_dir, code, meta["lap_number"]))
             series, _rounding = convert_channels(telemetry)
             reasons = check_lap(meta, series)
             if reasons:
@@ -723,7 +902,8 @@ def print_skips(skipped: list[tuple[str, int, list[str]]]) -> None:
         print("\nno laps were skipped for constraint violations")
 
 
-def write_plan(conn: psycopg.Connection, plan: list[dict], session_id: int) -> list[dict]:
+def write_plan(conn: psycopg.Connection, plan: list[dict], session_id: int,
+               session_dir: Path) -> list[dict]:
     """Persist one driver at a time, committing explicitly after each driver."""
     results = []
     for item in plan:
@@ -753,7 +933,7 @@ def write_plan(conn: psycopg.Connection, plan: list[dict], session_id: int) -> l
 
             for meta, _count in item["eligible"]:
                 series, _rounding = convert_channels(
-                    load_telemetry(telemetry_path(identity["code"], meta["lap_number"]))
+                    load_telemetry(telemetry_path(session_dir, identity["code"], meta["lap_number"]))
                 )
                 record["rows"] += insert_telemetry(
                     conn, build_rows(lap_ids[meta["lap_number"]], series)
@@ -775,10 +955,17 @@ def write_plan(conn: psycopg.Connection, plan: list[dict], session_id: int) -> l
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Import 2025 Belgian Grand Prix qualifying telemetry into telemetry_samples."
+        description="Import a 2025 regular qualifying session into telemetry_samples."
     )
     parser.add_argument("--dry-run", action="store_true",
                         help="validate and report without touching the database")
+    parser.add_argument("--race-id", type=int, default=DEFAULT_RACE_ID, metavar="ID",
+                        help=f"F1DB race id (default {DEFAULT_RACE_ID}: 2025 Belgian GP)")
+    parser.add_argument("--session-key", type=int, default=DEFAULT_SESSION_KEY, metavar="KEY",
+                        help=f"OpenF1 qualifying session key (default {DEFAULT_SESSION_KEY})")
+    parser.add_argument("--session-dir", default=DEFAULT_SESSION_DIR, metavar="PATH",
+                        help="archive folder of the session, relative to the 2025 archive "
+                             f"(default {DEFAULT_SESSION_DIR!r})")
     parser.add_argument("--driver", action="append", metavar="CODE",
                         help="limit to these driver codes, e.g. --driver VER (repeatable)")
     parser.add_argument("--lap-id", action="append", type=int, metavar="ID",
@@ -792,7 +979,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     mode = "DRY RUN (no database changes)" if args.dry_run else "WRITE MODE"
     print("=" * 78)
-    print(f"SPA 2025 QUALIFYING IMPORT - {mode}")
+    print(f"QUALIFYING TELEMETRY IMPORT - {mode}")
     print("=" * 78)
 
     try:
@@ -811,13 +998,37 @@ def main(argv: list[str] | None = None) -> int:
 
     expected: dict[str, int] = {}
     try:
-        event_id = resolve_event(conn)
-        session_id = resolve_session(conn, event_id)
-        print(f"event_id       : {event_id} (F1DB race {RACE_ID})")
-        print(f"session_id     : {session_id} (OpenF1 session {SESSION_KEY}, {SESSION_TYPE})")
+        target = build_target(args.race_id, args.session_key, args.session_dir)
+        race = load_f1db_race(target.race_id)
+        print(f"target         : {target.label}")
+        print(f"session folder : {target.session_dir}")
+        print(f"F1DB race      : {target.race_id} -> {race['year']} round {race['round']} | "
+              f"{race['date']} | {race['circuit']}")
 
-        grid = load_f1db_grid()
-        identities = resolve_identities(load_archive_drivers(), grid, load_f1db_driver_names())
+        event_id = lookup_event(conn, target.race_id)
+        session_id = lookup_session(conn, event_id, target.session_key)
+        openf1 = None
+        if event_id is None or session_id is None:
+            openf1 = fetch_openf1_session(target.session_key, race)
+            print(f"OpenF1 session : {openf1['session_name']} at {openf1['circuit']} "
+                  f"({openf1['country']}) | meeting {openf1['meeting_key']} | "
+                  f"{openf1['date_start']}")
+
+        write = not args.dry_run
+        event_id, event_action, event_values = ensure_event(
+            conn, target, race, openf1, write)
+        session_id, session_action, session_values = ensure_session(
+            conn, target, event_id, openf1, write)
+        print(f"events row     : {event_action}"
+              + (f" | {event_values}" if event_values else ""))
+        print(f"sessions row   : {session_action}"
+              + (f" | {session_values}" if session_values else ""))
+        if write:
+            conn.commit()  # parent rows must exist before the per-driver transactions
+
+        grid = load_f1db_grid(target.race_id)
+        identities = resolve_identities(
+            load_archive_drivers(target.session_dir), grid, load_f1db_driver_names())
         print_section(f"DRIVER IDENTITY - {len(identities)}/{len(grid)} grid drivers resolved by car number")
         print_identity_table(identities)
 
@@ -838,7 +1049,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValidationError(f"--driver not in this session: {sorted(unknown)}")
             drivers = [identity for identity in identities if identity["code"] in wanted]
 
-        plan, skipped = build_plan(drivers, lap_targets, args.limit)
+        plan, skipped = build_plan(drivers, lap_targets, args.limit, target.session_dir)
 
         print_section("IMPORT PLAN")
         print_plan(plan)
@@ -847,7 +1058,9 @@ def main(argv: list[str] | None = None) -> int:
         total_laps = sum(len(item["laps"]) for item in plan)
         eligible_laps = sum(len(item["eligible"]) for item in plan)
         total_rows = sum(item["samples"] for item in plan)
-        stored_samples = sum(session_counts(conn, session_id)["samples"].values())
+        stored_samples = (
+            sum(session_counts(conn, session_id)["samples"].values()) if session_id else 0
+        )
         print_section("TOTALS")
         print(f"laps with metadata    : {total_laps}")
         print(f"laps with telemetry   : {eligible_laps}")
@@ -864,7 +1077,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         print_section("WRITE - one explicit commit per driver")
-        write_plan(conn, plan, session_id)
+        write_plan(conn, plan, session_id, target.session_dir)
         expected = {item["identity"]["code"]: item["samples"] for item in plan}
     except (ValidationError, SourceError, psycopg.Error) as exc:
         print(f"\nABORTED: {type(exc).__name__}: {redact(exc)}")
