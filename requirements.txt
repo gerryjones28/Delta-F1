@@ -1,4 +1,4 @@
-# DeltaTrace - initial development dependencies
+# Delta F1 - initial development dependencies
 # Install with: .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 # HTTP client for the OpenF1 REST API
@@ -18,3 +18,8 @@ python-dotenv>=1.0,<2
 
 # Test runner
 pytest>=8.0,<9
+
+# Read-only HTTP API layer (src/api) and its endpoint tests
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+httpx>=0.27,<1        # required by fastapi.testclient

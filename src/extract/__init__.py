@@ -1,4 +1,4 @@
-"""Extraction helpers for the two DeltaTrace data sources.
+"""Extraction helpers for the two Delta F1 data sources.
 
 ``openf1_client``       - thin requests-based wrapper around the OpenF1 REST API
 ``openf1_check``        - runnable connectivity check against ``/sessions``
