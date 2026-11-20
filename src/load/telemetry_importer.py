@@ -23,12 +23,18 @@ Two classes of problem are distinguished
 *Fatal* (the run aborts before writing anything): unresolved or ambiguous driver
 identity, missing event/session, missing channel, unequal channel lengths,
 non-monotonic timestamps, fractional values in integer columns, or a trace whose
-end does not match the recorded lap duration.
+end does not match the recorded lap duration on a lap the source does **not**
+flag as pit-out.
 
 *Ineligible* (that lap is skipped, everything else continues): no recorded lap
-duration, or measurements that would violate a CHECK constraint on
-``telemetry_samples``. Skipped laps are listed with the exact offending value;
-nothing is rounded, clamped or substituted to make them fit.
+duration; measurements that would violate a CHECK constraint on
+``telemetry_samples``; or a source-flagged pit-out lap (archive ``pout`` /
+OpenF1 ``is_pit_out_lap``) whose telemetry window is shorter than the recorded
+duration. Two documented conversions are applied and reported per import:
+integer-valued ``rpm`` is rounded from the resampled channel, and
+``rel_distance`` readings a rounding step outside [0, 1] at a lap boundary are
+snapped to the bound (see ``correct_rel_distance``). Anything larger, mid-lap, or
+on a non-monotonic lap is rejected and listed - never forced into range.
 
 Usage::
 
@@ -138,6 +144,16 @@ RANGE_RULES = {
 }
 
 DURATION_TOLERANCE_S = 0.005
+
+# rel_distance boundary correction. TracingInsights reconstructs lap distance from
+# integrated speed, so the first/last sample can sit a rounding step outside
+# [0, 1]. Only readings within this window, at a lap boundary, in the expected
+# direction, and on an otherwise monotonic lap are snapped; everything else is
+# left untouched and the lap stays excluded.
+REL_DISTANCE_SNAP_WINDOW = 5e-4
+REL_DISTANCE_MONOTONIC_TOLERANCE = 1e-5
+REL_DISTANCE_BOUNDARY_FRACTION = 0.01
+
 CHUNK_SIZE = 500
 MAX_REPORTED_ITEMS = 12
 
@@ -488,12 +504,86 @@ def convert_channels(telemetry: dict[str, list]) -> tuple[dict[str, list], dict[
     return converted, rounding
 
 
-def check_lap(meta: dict, series: dict[str, list]) -> list[str]:
+def correct_rel_distance(series: dict[str, list]) -> tuple[dict[str, list], list[dict], str | None]:
+    """Snap boundary rounding in ``rel_distance`` and report it.
+
+    Returns ``(series, corrections, rejection)``. A correction is only applied when
+    every out-of-range reading is
+
+    * within :data:`REL_DISTANCE_SNAP_WINDOW` of the interval,
+    * at a lap boundary (first/last ``REL_DISTANCE_BOUNDARY_FRACTION`` of samples),
+    * in the physical direction (negative only at the start, > 1 only at the end),
+    * and the lap is monotonic within :data:`REL_DISTANCE_MONOTONIC_TOLERANCE`.
+
+    Otherwise the lap is rejected with a reason and no value is changed. Other
+    channels are never touched.
+    """
+    rel = series["rel_distance"]
+    count = len(rel)
+    out_of_range = [
+        (index, value)
+        for index, value in enumerate(rel)
+        if value is not None and (value < 0.0 or value > 1.0)
+    ]
+    if not out_of_range:
+        return series, [], None
+
+    excess = max(abs(value if value < 0 else value - 1.0) for _, value in out_of_range)
+    if excess > REL_DISTANCE_SNAP_WINDOW:
+        return series, [], (
+            f"rel_distance is {excess:.3e} outside 0..1 at sample {out_of_range[0][0]}, "
+            f"beyond the {REL_DISTANCE_SNAP_WINDOW:g} correction window"
+        )
+
+    edge = max(2, int(count * REL_DISTANCE_BOUNDARY_FRACTION))
+    for index, value in out_of_range:
+        if not (index < edge or index >= count - edge):
+            return series, [], (
+                f"rel_distance {value:.9f} at sample {index}/{count} is not a lap boundary"
+            )
+        if value < 0 and index >= count - edge:
+            return series, [], (
+                f"negative rel_distance {value:.9f} at the end of the lap (sample {index})"
+            )
+        if value > 1 and index < edge:
+            return series, [], (
+                f"rel_distance {value:.9f} > 1 at the start of the lap (sample {index})"
+            )
+
+    for index in range(count - 1):
+        previous, current = rel[index], rel[index + 1]
+        if previous is None or current is None:
+            continue
+        if current < previous - REL_DISTANCE_MONOTONIC_TOLERANCE:
+            return series, [], (
+                f"rel_distance is not monotonic at sample {index} "
+                f"({previous:.9f} -> {current:.9f})"
+            )
+
+    corrected = list(rel)
+    corrections = []
+    for index, value in out_of_range:
+        snapped = 0.0 if value < 0 else 1.0
+        corrected[index] = snapped
+        corrections.append({"index": index, "original": value, "stored": snapped})
+
+    updated = dict(series)
+    updated["rel_distance"] = corrected
+    return updated, corrections, None
+
+
+def check_lap(meta: dict, series: dict[str, list], pit_out: bool = False) -> list[str]:
     """Validate one lap.
 
     Returns a list of reasons the lap is *ineligible* for telemetry (skipped and
     reported). Raises :class:`ValidationError` for fatal problems, which stop the
     run before anything is written.
+
+    ``pit_out`` must come from explicit source metadata (the archive's ``pout``
+    timestamp and/or OpenF1's ``is_pit_out_lap``); it is never inferred from a
+    duration mismatch. It only excuses a trace that is *shorter* than the recorded
+    lap, which is how pit-out laps are archived: the telemetry window begins after
+    the official lap clock starts.
     """
     duration = meta["duration"]
     if duration is None:
@@ -518,6 +608,13 @@ def check_lap(meta: dict, series: dict[str, list]) -> list[str]:
             raise ValidationError(f"elapsed_s not strictly increasing at sample {index}")
 
     if abs(times[-1] - duration) > DURATION_TOLERANCE_S:
+        shortfall = times[-1] - duration
+        if pit_out and shortfall < 0:
+            return [
+                f"pit-out lap: telemetry window is {abs(shortfall):.3f} s shorter than the "
+                f"recorded lap (trace ends at {times[-1]:.3f} s, lap_duration is "
+                f"{duration:.3f} s)"
+            ]
         raise ValidationError(
             f"trace ends at {times[-1]:.3f} s but lap_duration is {duration:.3f} s"
         )
@@ -815,11 +912,53 @@ def session_counts(conn: psycopg.Connection, session_id: int) -> dict[str, dict[
     return {"laps": laps, "samples": samples}
 
 
+def planned_lap_samples(plan: list[dict]) -> dict[tuple[str, int], int]:
+    """Samples the plan expects, keyed by (driver code, lap number)."""
+    return {
+        (item["identity"]["code"], meta["lap_number"]): count
+        for item in plan
+        for meta, count in item["eligible"]
+    }
+
+
+def stored_lap_samples(conn: psycopg.Connection,
+                       session_id: int) -> dict[tuple[str, int], int]:
+    """Samples actually stored, keyed by (driver code, lap number)."""
+    query = """
+        SELECT d.abbreviation, l.lap_number, COUNT(*)
+        FROM telemetry_samples t
+        JOIN laps l ON l.lap_id = t.lap_id
+        JOIN session_entries se ON se.entry_id = l.entry_id
+        JOIN drivers d ON d.driver_id = se.driver_id
+        WHERE se.session_id = %s
+        GROUP BY d.abbreviation, l.lap_number
+    """
+    with conn.cursor() as cur:
+        cur.execute(query, (session_id,))
+        return {(row[0], row[1]): row[2] for row in cur.fetchall()}
+
+
+def compare_planned_laps(expected: dict[tuple[str, int], int],
+                         stored: dict[tuple[str, int], int]) -> list[str]:
+    """Mismatches restricted to the laps the plan actually covers.
+
+    Laps outside the plan are ignored, so a ``--lap-id`` filtered import is
+    verified against exactly what it planned instead of the whole session.
+    """
+    problems = []
+    for (code, lap_number), planned in sorted(expected.items()):
+        actual = stored.get((code, lap_number), 0)
+        if actual != planned:
+            problems.append(f"{code} lap {lap_number}: stored {actual:,} != planned {planned:,}")
+    return problems
+
+
 # ---------------------------------------------------------------------------
 # Planning and reporting
 # ---------------------------------------------------------------------------
 def build_plan(identities: list[dict], lap_targets: set[tuple[str, int]] | None,
-               limit: int | None, session_dir: Path) -> tuple[list[dict], list[tuple[str, int, list[str]]]]:
+               limit: int | None, session_dir: Path,
+               pit_out_laps: set[int] | None = None) -> tuple[list[dict], list[tuple[str, int, list[str]]]]:
     """Read every candidate lap, validate it and classify it.
 
     Returns (plan, skipped) where each plan item carries the lap metadata to
@@ -832,7 +971,8 @@ def build_plan(identities: list[dict], lap_targets: set[tuple[str, int]] | None,
 
     for identity in identities:
         code = identity["code"]
-        item = {"identity": identity, "laps": [], "eligible": [], "skips": [], "samples": 0}
+        item = {"identity": identity, "laps": [], "eligible": [], "skips": [],
+                "corrections": [], "samples": 0}
         for meta in load_laptimes(session_dir, code):
             if lap_targets is not None and (code, meta["lap_number"]) not in lap_targets:
                 continue
@@ -847,13 +987,25 @@ def build_plan(identities: list[dict], lap_targets: set[tuple[str, int]] | None,
 
             telemetry = load_telemetry(telemetry_path(session_dir, code, meta["lap_number"]))
             series, _rounding = convert_channels(telemetry)
-            reasons = check_lap(meta, series)
+            series, corrections, rejection = correct_rel_distance(series)
+            # Pit-out status comes from explicit metadata only: the archive's pout
+            # timestamp, optionally corroborated by OpenF1's is_pit_out_lap.
+            pit_out = meta["has_pit_out"] or (
+                pit_out_laps is not None and meta["lap_number"] in pit_out_laps
+            )
+            reasons = check_lap(meta, series, pit_out)
+            if rejection:
+                reasons = [rejection] + reasons
             if reasons:
                 item["skips"].append((meta["lap_number"], reasons))
             else:
                 count = len(series["elapsed_s"])
                 item["eligible"].append((meta, count))
                 item["samples"] += count
+                item["corrections"].extend(
+                    {"code": code, "lap": meta["lap_number"], **entry}
+                    for entry in corrections
+                )
 
         if item["laps"]:
             plan.append(item)
@@ -891,15 +1043,38 @@ def print_plan(plan: list[dict]) -> None:
 
 def print_skips(skipped: list[tuple[str, int, list[str]]]) -> None:
     untimed = [s for s in skipped if s[2] == ["no recorded lap duration"]]
-    blocked = [s for s in skipped if s not in untimed]
+    pit_out = [
+        s for s in skipped
+        if s not in untimed and s[2] and s[2][0].startswith("pit-out lap:")
+    ]
+    blocked = [s for s in skipped if s not in untimed and s not in pit_out]
 
     print(f"\nlaps without a recorded duration (metadata only, no telemetry): {len(untimed)}")
+
+    print(f"\npit-out laps with a short telemetry window (skipped, not fatal): {len(pit_out)}")
+    for code, number, reasons in pit_out:
+        print(f"  {code} lap {number}: " + "; ".join(reasons))
+
     if blocked:
         print(f"\nlaps skipped because a measurement would violate a CHECK constraint: {len(blocked)}")
         for code, number, reasons in blocked:
             print(f"  {code} lap {number}: " + "; ".join(reasons))
     else:
         print("\nno laps were skipped for constraint violations")
+
+
+def print_corrections(corrections: list[dict]) -> None:
+    """Audit trail: every snapped rel_distance sample, with original and stored value."""
+    if not corrections:
+        print("\nrel_distance boundary corrections: none")
+        return
+    laps = {(entry["code"], entry["lap"]) for entry in corrections}
+    print(f"\nrel_distance boundary corrections: {len(corrections)} sample(s) "
+          f"in {len(laps)} lap(s)")
+    print(f"  {'code':<5}{'lap':>4}{'index':>7}{'original':>16}{'stored':>8}")
+    for entry in corrections:
+        print(f"  {entry['code']:<5}{entry['lap']:>4}{entry['index']:>7}"
+              f"{entry['original']:>16.9f}{entry['stored']:>8.1f}")
 
 
 def write_plan(conn: psycopg.Connection, plan: list[dict], session_id: int,
@@ -915,6 +1090,7 @@ def write_plan(conn: psycopg.Connection, plan: list[dict], session_id: int,
             "lap_inserted": 0,
             "lap_updated": 0,
             "lap_existing": 0,
+            "corrections": 0,
             "rows": 0,
         }
         try:
@@ -935,6 +1111,12 @@ def write_plan(conn: psycopg.Connection, plan: list[dict], session_id: int,
                 series, _rounding = convert_channels(
                     load_telemetry(telemetry_path(session_dir, identity["code"], meta["lap_number"]))
                 )
+                series, corrections, rejection = correct_rel_distance(series)
+                if rejection:
+                    raise ValidationError(
+                        f"{identity['code']} lap {meta['lap_number']}: {rejection}"
+                    )
+                record["corrections"] += len(corrections)
                 record["rows"] += insert_telemetry(
                     conn, build_rows(lap_ids[meta["lap_number"]], series)
                 )
@@ -949,6 +1131,7 @@ def write_plan(conn: psycopg.Connection, plan: list[dict], session_id: int,
             f"  {identity['code']:<5} driver {record['driver']:<8} entry {record['entry']:<8} "
             f"laps +{record['lap_inserted']:<3} ~{record['lap_updated']:<3} "
             f"={record['lap_existing']:<3} rows offered {record['rows']:>8,}"
+            f" | rel_distance fixes {record['corrections']}"
         )
     return results
 
@@ -1054,6 +1237,7 @@ def main(argv: list[str] | None = None) -> int:
         print_section("IMPORT PLAN")
         print_plan(plan)
         print_skips(skipped)
+        print_corrections([entry for item in plan for entry in item["corrections"]])
 
         total_laps = sum(len(item["laps"]) for item in plan)
         eligible_laps = sum(len(item["eligible"]) for item in plan)
@@ -1078,7 +1262,7 @@ def main(argv: list[str] | None = None) -> int:
 
         print_section("WRITE - one explicit commit per driver")
         write_plan(conn, plan, session_id, target.session_dir)
-        expected = {item["identity"]["code"]: item["samples"] for item in plan}
+        expected = planned_lap_samples(plan)
     except (ValidationError, SourceError, psycopg.Error) as exc:
         print(f"\nABORTED: {type(exc).__name__}: {redact(exc)}")
         try:
@@ -1097,6 +1281,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         counts = session_counts(verify, session_id)
+        stored = stored_lap_samples(verify, session_id)
         drivers_total = scalar(verify, "SELECT COUNT(*) FROM drivers")
         entries_total = scalar(
             verify, "SELECT COUNT(*) FROM session_entries WHERE session_id = %s", (session_id,)
@@ -1116,24 +1301,41 @@ def main(argv: list[str] | None = None) -> int:
     print(f"laps in this session  : {laps_total}")
     print(f"telemetry_samples     : {samples_total:,}")
     print()
+
+    planned_by_driver: dict[str, int] = {}
+    stored_by_driver: dict[str, int] = {}
+    for (code, lap_number), planned_count in expected.items():
+        planned_by_driver[code] = planned_by_driver.get(code, 0) + planned_count
+        stored_by_driver[code] = (
+            stored_by_driver.get(code, 0) + stored.get((code, lap_number), 0)
+        )
+
+    scope = "full session" if lap_targets is None else "--lap-id filtered"
+    print(f"scope                 : {len(expected)} planned lap(s), {scope}")
     print(f"{'code':<5}{'stored':>10}{'planned':>10}   status")
-    mismatches = 0
-    for code in sorted(expected):
-        actual = counts["samples"].get(code, 0)
-        planned = expected[code]
-        if actual != planned:
-            mismatches += 1
+    for code in sorted(planned_by_driver):
+        actual = stored_by_driver[code]
+        planned = planned_by_driver[code]
         print(f"{code:<5}{actual:>10,}{planned:>10,}   {'OK' if actual == planned else 'MISMATCH'}")
+    print(f"{'TOTAL':<5}{sum(stored_by_driver.values()):>10,}"
+          f"{sum(planned_by_driver.values()):>10,}")
 
-    stored_for_plan = sum(counts["samples"].get(code, 0) for code in expected)
-    planned_total = sum(expected.values())
-    print(f"{'TOTAL':<5}{stored_for_plan:>10,}{planned_total:>10,}   "
-          f"{'OK' if stored_for_plan == planned_total else 'MISMATCH'}")
+    problems = compare_planned_laps(expected, stored)
+    if lap_targets is None:
+        # Unfiltered runs must also account for every stored sample in the session.
+        session_total = sum(counts["samples"].values())
+        planned_total = sum(expected.values())
+        if session_total != planned_total:
+            problems.append(f"session total {session_total:,} != planned {planned_total:,}")
 
-    if mismatches:
-        print(f"\nRESULT: {mismatches} driver(s) do not match the plan")
+    if problems:
+        for problem in problems[:10]:
+            print(f"  VERIFICATION: {problem}")
+        if len(problems) > 10:
+            print(f"  ... and {len(problems) - 10} more")
+        print(f"\nRESULT: {len(problems)} problem(s) found")
         return 3
-    print("\nRESULT: stored counts match the plan")
+    print(f"\nRESULT: {len(expected)} planned lap(s) verified, stored counts match the plan")
     return 0
 
 
