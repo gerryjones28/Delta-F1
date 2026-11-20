@@ -1,0 +1,38 @@
+Circuit schematics
+
+The local points in circuits.json are projected from the LineString features in
+Tomislav Bacinger's f1-circuits dataset. The 2025 venue list identifies each
+circuit. The coordinates use longitude scaled by the cosine of mean latitude,
+north up, translated and uniformly scaled to a 180 by 110 view box. Each venue
+has an independent display scale. The source supplies illustrative outlines.
+The telemetry API supplies sector-anchored distance but no geographic samples,
+so the schematics carry no measured car positions or elevation profiles.
+
+Pinned source
+https://github.com/bacinger/f1-circuits/tree/8094e957b8d6aa8b9f4510c93968556cccd30e02
+
+Geometry and venue index
+https://github.com/bacinger/f1-circuits/blob/8094e957b8d6aa8b9f4510c93968556cccd30e02/f1-circuits.geojson
+https://github.com/bacinger/f1-circuits/blob/8094e957b8d6aa8b9f4510c93968556cccd30e02/championships/f1-locations-2025.json
+
+MIT license
+
+Copyright (c) 2019-2025 Tomislav Bacinger
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
