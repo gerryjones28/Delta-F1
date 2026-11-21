@@ -1,4 +1,4 @@
-﻿import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   Activity,
   AudioWaveform,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { flushSync } from 'react-dom'
 import Hero, { InstrumentRail } from './Hero'
+import { SoundControls, useStudioSound } from './Sound'
 import { Archive, ConnectionNotice } from './Archive'
 import { useQuery, type Session } from './api'
 
@@ -81,6 +82,8 @@ function getRoute() {
   return window.location.hash.slice(1) || 'overview'
 }
 export default function App() {
+  const sound = useStudioSound()
+  const { cue } = sound
   const [route, setRoute] = useState(getRoute)
   const [revealing, setRevealing] = useState(
     () => getRoute() === 'overview' && !matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -95,8 +98,8 @@ export default function App() {
     if (!revealing) return
     const finish = () => setRevealing(false)
     const motion = matchMedia('(prefers-reduced-motion: reduce)')
-    // Let the poster carry the reveal. Shader compilation starts after the last panel settles.
-    const timer = window.setTimeout(finish, 1650)
+    // Navigation and panel timing are independent of WebGL and the network.
+    const timer = window.setTimeout(finish, 2720)
     motion.addEventListener('change', finish)
     window.addEventListener('pointerdown', finish, { once: true })
     window.addEventListener('keydown', finish, { once: true })
@@ -115,6 +118,7 @@ export default function App() {
     let transition: ViewTransition | undefined
     const navigate = async () => {
       const next = getRoute()
+      cue('navigate')
       const request = ++generation
       const venue = (next.startsWith('session/') ? next : previous).split('/')[1]
       previous = next
@@ -130,16 +134,16 @@ export default function App() {
           setMenu(false)
           setStatusOpen(false)
         })
+        const main = document.getElementById('main')
+        if (main && !document.startViewTransition) main.classList.add('route-arrival')
         window.scrollTo({ top: 0, behavior: 'instant' })
-        document.getElementById('main')?.focus({ preventScroll: true })
+        main?.focus({ preventScroll: true })
       }
       transition?.skipTransition()
       if (!document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) {
         commit()
         return
       }
-      if (next.startsWith('session/')) await import('./Workspace')
-      if (request !== generation) return
       markVenue()
       transition = document.startViewTransition(() => {
         commit()
@@ -157,7 +161,7 @@ export default function App() {
       transition?.skipTransition()
       window.removeEventListener('hashchange', navigate)
     }
-  }, [])
+  }, [cue])
   useEffect(() => {
     if (!menu && !statusOpen) return
     const key = (e: KeyboardEvent) => {
@@ -204,10 +208,12 @@ export default function App() {
             ))}
           </nav>
           <div className="top-right">
+            <SoundControls sound={sound} />
             <button
               className={'connection ' + state}
               aria-expanded={statusOpen}
               onClick={() => {
+                cue('select')
                 setStatusOpen(!statusOpen)
                 setMenu(false)
               }}
@@ -250,6 +256,7 @@ export default function App() {
           <>
             <Hero
               revealing={revealing}
+              skipReveal={() => setRevealing(false)}
               enter={() => {
                 window.location.hash = 'archive'
               }}
@@ -262,15 +269,15 @@ export default function App() {
         ) : route === 'method' ? (
           <Method />
         ) : route.startsWith('session/') && session ? (
-          <Suspense fallback={<p className="shell empty">Opening analysis workspace…</p>}>
-            <Workspace session={session} />
+          <Suspense fallback={<p className="shell empty loading-view" role="status">Opening analysis workspace…</p>}>
+            <Workspace session={session} cue={cue} />
           </Suspense>
         ) : route.startsWith('session/') && !sessions ? (
           <section className="shell archive">
             {result.error ? (
               <ConnectionNotice error={result.error} retry={retry} />
             ) : (
-              <p className="empty">Opening session…</p>
+              <p className="empty loading-view" role="status">Opening session…</p>
             )}
           </section>
         ) : (

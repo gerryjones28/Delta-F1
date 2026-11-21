@@ -187,7 +187,7 @@ function Results({ data }: { data: Comparison }) {
     </div>
   )
 }
-export default function Workspace({ session }: { session: Session }) {
+export default function Workspace({ session, cue }: { session: Session; cue: (type: 'confirmed' | 'select') => void }) {
   const [revision, setRevision] = useState(0)
   const base = '/api/sessions/' + encodeURIComponent(session.id)
   const drivers = useQuery<{ drivers: Driver[] }>(base + '/drivers', revision)
@@ -219,7 +219,11 @@ export default function Workspace({ session }: { session: Session }) {
   )
   const busy = active && !result.data && !result.error
   const retry = () => setRevision((v) => v + 1)
+  useEffect(() => {
+    if (active && result.data) cue('confirmed')
+  }, [active, result.data, cue])
   const run = () => {
+    cue('select')
     setSubmitted(spec)
     setAttempt((v) => v + 1)
   }
@@ -269,7 +273,7 @@ export default function Workspace({ session }: { session: Session }) {
           <Activity size={17} />
           {busy ? 'Aligning laps…' : 'Compare laps'}
         </button>
-        <span role="status">
+        <span role="status" className={busy || (!drivers.data && !error) ? 'loading-signal' : undefined}>
           {same
             ? 'Select two different laps.'
             : busy

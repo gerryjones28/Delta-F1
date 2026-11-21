@@ -22,3 +22,5 @@ The dev and preview servers proxy `/api` to `http://127.0.0.1:8000`. To use anot
 
 The control-room sculpture has pointer and keyboard orbit, a Home-key camera reset, reduced-motion support, and a local WebP fallback. Each circuit schematic uses independently projected venue coordinates. Geographic provenance and license terms are in [the circuit data credits](public/licenses/circuits.txt).
 
+Studio sound is opt-in. The local build includes the supplied *Liminal* MP3. Before public deployment, verify the recording's public-use and redistribution rights with its rights holder and retain the license.
+

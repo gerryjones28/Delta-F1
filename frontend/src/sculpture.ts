@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
+import { createAirflow } from './airflow'
+import { createRollingRoad } from './road'
 
 type Point = [number, number, number]
 type Section = [x: number, halfWidth: number, bottom: number, top: number]
@@ -9,7 +11,7 @@ const TAU = Math.PI * 2
 const V = (p: Point) => new THREE.Vector3(...p)
 const signedPower = (value: number, power: number) => Math.sign(value) * Math.abs(value) ** power
 
-function surface(rows: number, columns: number, sample: (u: number, v: number) => Point) {
+function surface(rows: number, columns: number, sample: (u: number, v: number) => Point, closed = false) {
   const positions: number[] = [],
     uv: number[] = [],
     indices: number[] = []
@@ -29,40 +31,59 @@ function surface(rows: number, columns: number, sample: (u: number, v: number) =
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
   geometry.setIndex(indices)
   geometry.computeVertexNormals()
+  if (closed) {
+    // Duplicate UVs at the wrap, but share one normal so a softbox crosses the seam continuously.
+    const normals = geometry.getAttribute('normal')
+    const left = new THREE.Vector3(), right = new THREE.Vector3()
+    for (let row = 0; row <= rows; row++) {
+      const first = row * (columns + 1), last = first + columns
+      left.fromBufferAttribute(normals, first).add(right.fromBufferAttribute(normals, last)).normalize()
+      normals.setXYZ(first, left.x, left.y, left.z)
+      normals.setXYZ(last, left.x, left.y, left.z)
+    }
+  }
   return geometry
 }
 
-function studioEnvironment() {
-  const canvas = document.createElement('canvas')
-  canvas.width = 1024
-  canvas.height = 512
-  const ctx = canvas.getContext('2d')!
-  const sky = ctx.createLinearGradient(0, 0, 0, 512)
-  sky.addColorStop(0, '#747474')
-  sky.addColorStop(0.21, '#161718')
-  sky.addColorStop(0.42, '#050506')
-  sky.addColorStop(0.49, '#202122')
-  sky.addColorStop(0.57, '#080809')
-  sky.addColorStop(1, '#0a0a0b')
-  ctx.fillStyle = sky
-  ctx.fillRect(0, 0, 1024, 512)
-
-  // Long luminous panels give polished surfaces clean, continuous reflections.
-  for (const [x, y, w, h, color] of [
-    [32, 117, 280, 23, '#fafafa'],
-    [318, 74, 260, 42, '#f4f3ef'],
-    [680, 117, 298, 17, '#d4d7da'],
-    [62, 210, 250, 4, '#b0b2b4'],
-    [465, 176, 164, 4, '#f7f7f4'],
-    [884, 182, 140, 5, '#929395'],
-  ] as const) {
-    ctx.fillStyle = color
-    ctx.fillRect(x, y, w, h)
+// Capture luminous diffusion panels in linear HDR once. The studio stays invisible to the camera.
+function studioEnvironment(renderer: THREE.WebGLRenderer) {
+  const rig = new THREE.Scene()
+  rig.background = new THREE.Color().setRGB(0.009, 0.009, 0.01)
+  const panel = new THREE.PlaneGeometry(1, 1)
+  const emitters: THREE.ShaderMaterial[] = []
+  function softbox(position: Point, width: number, height: number, radiance: Point, roll = 0) {
+    const emitter = new THREE.ShaderMaterial({
+      uniforms: { radiance: { value: V(radiance) } },
+      vertexShader: `varying vec2 vUv;
+        void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+      fragmentShader: `uniform vec3 radiance; varying vec2 vUv;
+        void main(){
+          vec2 edge=abs(2.*vUv-1.);
+          float diffuser=1.-smoothstep(.72,1.,max(edge.x,edge.y));
+          float bank=mix(.46,1.,1.-vUv.y);
+          gl_FragColor=vec4(radiance*diffuser*bank,1.);
+        }`,
+    })
+    const card = new THREE.Mesh(panel, emitter)
+    card.position.copy(V(position))
+    card.lookAt(0, 0, 0)
+    card.rotateZ(roll)
+    card.scale.set(width, height, 1)
+    rig.add(card)
+    emitters.push(emitter)
   }
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.mapping = THREE.EquirectangularReflectionMapping
-  texture.colorSpace = THREE.SRGBColorSpace
-  return texture
+  // Ceiling silk, long side banks, rear kicker and the dim frontal bounce card.
+  softbox([-0.8, 4.8, 0.4], 7.6, 1.45, [4.8, 4.7, 4.5], 0.22)
+  softbox([1.3, 2.2, -4.3], 8.2, 0.72, [13, 13.2, 13.5], -0.12)
+  softbox([1.9, 1.45, 4.8], 7.6, 1.1, [6.2, 6.0, 5.8], 0.16)
+  softbox([4.6, 2.9, 0.6], 2.1, 1.8, [7.6, 7.8, 8.0])
+  softbox([-5, 1.8, -1.3], 3.6, 2.4, [0.75, 0.74, 0.72])
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  const map = pmrem.fromScene(rig, 0, 0.1, 24)
+  pmrem.dispose()
+  panel.dispose()
+  emitters.forEach(material => material.dispose())
+  return map
 }
 
 function carSculpture() {
@@ -72,17 +93,21 @@ function carSculpture() {
     return new THREE.MeshStandardMaterial({ color, metalness, roughness, side: THREE.DoubleSide })
   }
   const lacquer = new THREE.MeshPhysicalMaterial({
-    color: '#242426',
-    metalness: 0.42,
-    roughness: 0.24,
-    clearcoat: 0.92,
-    clearcoatRoughness: 0.13,
+    color: '#202123',
+    metalness: 0.27,
+    roughness: 0.32,
+    clearcoat: 0.88,
+    clearcoatRoughness: 0.105,
+    ior: 1.48,
     side: THREE.DoubleSide,
   })
-  const pearl = finish('#d6d6d3', 0.45, 0.24)
-  const satin = finish('#5e5f60', 0.78, 0.3),
-    titanium = finish('#abadad', 0.86, 0.23)
-  const carbon = finish('#212122', 0.42, 0.32),
+  const pearl = new THREE.MeshPhysicalMaterial({
+    color: '#aaa9a4', metalness: 0.19, roughness: 0.33,
+    clearcoat: 0.83, clearcoatRoughness: 0.16, ior: 1.48, side: THREE.DoubleSide,
+  })
+  const satin = finish('#555656', 0.91, 0.37),
+    titanium = finish('#9d9e9c', 0.96, 0.215)
+  const carbon = finish('#202021', 0.14, 0.47),
     black = finish('#121213', 0.29, 0.38)
   // A mipmapped twill modulates the clear resin's roughness at grazing angles.
   const weaveSize = 32
@@ -90,7 +115,7 @@ function carSculpture() {
   for (let y = 0; y < weaveSize; y++) {
     for (let x = 0; x < weaveSize; x++) {
       const warp = (Math.floor(x / 4) + Math.floor(y / 4)) % 4 < 2
-      const fiber = Math.cos((warp ? x : y) * Math.PI / 2)
+      const fiber = Math.cos(((warp ? x : y) * Math.PI) / 2)
       const value = Math.round(190 + (warp ? 22 : 0) + 25 * fiber)
       weave.set([value, value, value, 255], (y * weaveSize + x) * 4)
     }
@@ -104,8 +129,31 @@ function carSculpture() {
   resin.needsUpdate = true
   carbon.roughnessMap = resin
   textures.push(resin)
-  const rubber = finish('#232324', 0.01, 0.5),
-    sidewall = finish('#313132', 0.03, 0.45)
+  const rubber = finish('#1e1e1f', 0, 0.78),
+    sidewall = finish('#282829', 0, 0.54)
+  // Circumferential wear and fine grain soften the wide, chalky highlight on each slick.
+  const grainSize = 128
+  const grain = new Uint8Array(grainSize * grainSize * 4)
+  let seed = 301
+  for (let y = 0; y < grainSize; y++) {
+    for (let x = 0; x < grainSize; x++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+      const wear = Math.sin(y * TAU / 8 + 0.3 * Math.sin(x * TAU / grainSize))
+      const value = Math.round(200 + wear * 15 + 34 * (seed / 4294967296 - 0.5))
+      grain.set([value, value, value, 255], 4 * (y * grainSize + x))
+    }
+  }
+  const tread = new THREE.DataTexture(grain, grainSize, grainSize)
+  tread.wrapS = tread.wrapT = THREE.RepeatWrapping
+  tread.repeat.set(6, 1)
+  tread.generateMipmaps = true
+  tread.minFilter = THREE.LinearMipmapLinearFilter
+  tread.magFilter = THREE.LinearFilter
+  tread.needsUpdate = true
+  rubber.roughnessMap = tread
+  rubber.bumpMap = tread
+  rubber.bumpScale = 0.00055
+  textures.push(tread)
   const recess = finish('#09090a', 0.04, 0.78)
   const greyInk = finish('#787876', 0.19, 0.46)
   const materials: Finish[] = [
@@ -195,7 +243,7 @@ function carSculpture() {
       ]
     }
     add(
-      surface(sections.length * 5, 36, (u, v) => point(u, v * TAU)),
+      surface(sections.length * 5, 36, (u, v) => point(u, v * TAU), true),
       mat,
     )
     return point
@@ -237,7 +285,7 @@ function carSculpture() {
     // A closed lenticular profile across the span. Each wing element has its own camber.
     for (const side of [-1, 1]) {
       add(
-        surface(36, 18, (u, v) => {
+        surface(36, 32, (u, v) => {
           const span = split + (1 - split) * u,
             a = v * TAU,
             f = (1 - Math.cos(a)) * 0.5
@@ -246,7 +294,7 @@ function carSculpture() {
             y + lift * span ** 1.8 + 0.025 * Math.sin(a) + 0.052 * f ** 2,
             side * span * width,
           ]
-        }),
+        }, true),
         mat,
       )
     }
@@ -615,6 +663,40 @@ function carSculpture() {
   }
   wheelText('D E L T A', -0.63, 0.12)
   wheelText('R A D I A L', 2.5, 0.097)
+  const frontRadius = 0.373
+  const frontWidth = 0.294
+  // Integrate one short rotary exposure once. The front-facing decal already spans the hub.
+  const wheelFace = document.createElement('canvas')
+  wheelFace.width = wheelFace.height = canvas.width
+  const face = wheelFace.getContext('2d')!
+  face.drawImage(canvas, 0, 0)
+  face.translate(192, 192)
+  const pixelsPerMeter = canvas.width / (2.05 * frontRadius)
+  face.scale(pixelsPerMeter, -pixelsPerMeter)
+  face.lineWidth = 0.021
+  face.strokeStyle = '#727271'
+  for (let i = 0; i < 12; i++) {
+    const a = (i * TAU) / 12
+    face.beginPath()
+    face.moveTo(0.065 * Math.cos(a), 0.065 * Math.sin(a))
+    face.lineTo(0.191 * Math.cos(a + 0.169), 0.191 * Math.sin(a + 0.169))
+    face.stroke()
+  }
+  const shutterCanvas = document.createElement('canvas')
+  shutterCanvas.width = shutterCanvas.height = canvas.width
+  const shutterCtx = shutterCanvas.getContext('2d')!
+  shutterCtx.translate(192, 192)
+  shutterCtx.globalCompositeOperation = 'lighter'
+  shutterCtx.globalAlpha = 1 / 28
+  for (let i = 0; i < 28; i++) {
+    shutterCtx.save()
+    shutterCtx.rotate((i / 27 - 0.5) * 0.71)
+    shutterCtx.drawImage(wheelFace, -192, -192)
+    shutterCtx.restore()
+  }
+  const shutter = new THREE.CanvasTexture(shutterCanvas)
+  shutter.colorSpace = THREE.SRGBColorSpace
+  textures.push(shutter)
   const print = new THREE.CanvasTexture(canvas)
   print.colorSpace = THREE.SRGBColorSpace
   textures.push(print)
@@ -623,9 +705,29 @@ function carSculpture() {
     transparent: true,
     depthWrite: false,
     roughness: 0.7,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
   })
-  materials.push(lettering)
+  const exposure = { value: 0 }
+  lettering.onBeforeCompile = (shader) => {
+    shader.uniforms.wheelExposure = exposure
+    shader.uniforms.shutterMap = { value: shutter }
+    shader.fragmentShader =
+      'uniform float wheelExposure; uniform sampler2D shutterMap;\n' + shader.fragmentShader
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `
+      vec4 sharp = texture2D(map, vMapUv);
+      vec4 swept = texture2D(shutterMap, vMapUv);
+      float coverage = mix(sharp.a, swept.a, wheelExposure);
+      vec3 ink = mix(sharp.rgb * sharp.a, swept.rgb * swept.a, wheelExposure);
+      diffuseColor *= vec4(ink / max(coverage, 0.0001), coverage);
+    `,
+    )
+  }
+  const spokes = carbon.clone()
+  spokes.transparent = true
+  spokes.forceSinglePass = true
+  materials.push(lettering, spokes)
   function ring(x: number, y: number, z: number, r: number, thick: number, mat: Finish) {
     add(new THREE.TorusGeometry(r, thick, 6, 64), mat, [x, y, z])
   }
@@ -656,69 +758,25 @@ function carSculpture() {
     surface(16, 16, (u, v) => nose(0.337 + v * 0.065, 2.37 - u * 1.58, 0.009)),
     paintPrint,
   )
+  const group = new THREE.Group()
+  const wheels: THREE.Group[] = []
   for (const front of [true, false]) {
-    const x = front ? -1.743 : 1.654,
-      y = front ? 0.373 : 0.39,
-      radius = y,
-      width = front ? 0.294 : 0.36
+    const x = front ? -1.743 : 1.654
+    const radius = front ? frontRadius : 0.39
+    const width = front ? frontWidth : 0.36
+    const y = radius
     for (const s of [-1, 1]) {
-      const z = (front ? 0.794 : 0.805) * s,
-        outer = z + s * width * 0.5
-      const profile = [
-        [0.196, -0.47],
-        [0.264, -0.511],
-        [0.319, -0.492],
-        [0.353, -0.415],
-        [0.37, -0.292],
-        [0.373, -0.16],
-        [0.374, 0.1],
-        [0.372, 0.275],
-        [0.363, 0.39],
-        [0.343, 0.475],
-        [0.308, 0.509],
-        [0.253, 0.516],
-        [0.204, 0.475],
-        [0.196, 0.425],
-        [0.196, -0.47],
-      ]
-      const g = new THREE.LatheGeometry(
-        profile.map(([r, h]) => new THREE.Vector2((r * radius) / 0.374, h * width)),
-        80,
-      )
-      g.rotateX(Math.PI / 2)
-      add(g, rubber, [x, y, z])
-      add(
-        new THREE.CircleGeometry(0.219, 64),
-        black,
-        [x, y, outer - 0.039 * s],
-        s === 1 ? [0, 0, 0] : [0, Math.PI, 0],
-      )
-      ring(x, y, outer - 0.012 * s, 0.202, 0.011, satin)
-      ring(x, y, outer + 0.003 * s, 0.217, 0.004, sidewall)
-      ring(x, y, outer + 0.005 * s, 0.306, 0.0027, greyInk)
-      ring(x, y, outer + 0.007 * s, 0.249, 0.0026, sidewall)
-      const disk = new THREE.CylinderGeometry(0.144, 0.144, 0.014, 44)
-      disk.rotateX(Math.PI / 2)
-      add(disk, satin, [x, y, outer - 0.026 * s])
-      for (let i = 0; i < 12; i++) {
-        const a = (i * TAU) / 12
-        strut(
-          [x + Math.cos(a) * 0.065, y + Math.sin(a) * 0.065, outer + 0.009 * s],
-          [x + Math.cos(a + 0.169) * 0.191, y + Math.sin(a + 0.169) * 0.191, outer - 0.007 * s],
-          0.012,
-          carbon,
-        )
-      }
-      const nut = new THREE.CylinderGeometry(0.049, 0.055, 0.046, 8)
-      nut.rotateX(Math.PI / 2)
-      add(nut, titanium, [x, y, outer + s * 0.009])
-      ball([x, y, outer + s * 0.04], [0.024, 0.024, 0.008], black)
-      add(
-        new THREE.PlaneGeometry(radius * 2.05, radius * 2.05),
-        lettering,
-        [x, y, outer + s * 0.014],
-        s === 1 ? [0, 0, 0] : [0, Math.PI, 0],
-      )
+      const z = (front ? 0.794 : 0.805) * s
+      const wheel = new THREE.Group()
+      wheel.name = `wheel-${front ? 'front' : 'rear'}-${s === 1 ? 'left' : 'right'}`
+      wheel.position.set(x, y, z)
+      wheel.rotation.order = 'ZYX'
+      wheel.rotation.y = s === 1 ? 0 : Math.PI
+      wheel.scale.set(radius / frontRadius, radius / frontRadius, width / frontWidth)
+      wheel.matrixAutoUpdate = false
+      wheel.updateMatrix()
+      wheels.push(wheel)
+      group.add(wheel)
       for (const [a, b, r] of [
         [[x - 0.41, 0.377, 0.19 * s], [x, 0.397, z - 0.095 * s], 0.025],
         [[x + 0.451, 0.433, 0.22 * s], [x, 0.408, z - 0.09 * s], 0.031],
@@ -732,50 +790,151 @@ function carSculpture() {
     }
   }
   strut([-0.841, 0.586, 0.028], [-0.87, 0.7, 0.031], 0.006, black)
-  const group = new THREE.Group()
-  for (const [material, geometries] of batches) {
-    const merged = mergeGeometries(geometries, false)
-    if (merged) group.add(new THREE.Mesh(merged, material))
-    geometries.forEach((g) => g.dispose())
+  function flushBatches(attach: (geometry: THREE.BufferGeometry, material: Finish) => void) {
+    for (const [material, geometries] of batches) {
+      const merged = mergeGeometries(geometries, false)
+      if (merged) attach(merged, material)
+      geometries.forEach((geometry) => geometry.dispose())
+    }
+    batches.clear()
   }
-  return { group, materials, textures }
-}
 
-function studioFloorTexture() {
-  const canvas = document.createElement('canvas')
-  canvas.width = 512
-  canvas.height = 256
-  const ctx = canvas.getContext('2d')!
-  function oval(x: number, y: number, rx: number, ry: number, opacity: number, rgb = '0,0,0') {
-    ctx.save()
-    ctx.translate(x, y)
-    ctx.scale(rx, ry)
-    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
-    gradient.addColorStop(0, `rgba(${rgb},${opacity})`)
-    gradient.addColorStop(0.5, `rgba(${rgb},${opacity * 0.46})`)
-    gradient.addColorStop(1, `rgba(${rgb},0)`)
-    ctx.fillStyle = gradient
-    ctx.fillRect(-1, -1, 2, 2)
-    ctx.restore()
+  flushBatches((geometry, material) => group.add(new THREE.Mesh(geometry, material)))
+
+  // Batch one local wheel by finish, then instance it on the four independent hub transforms.
+  const outer = frontWidth * 0.5
+  const profile = [
+    [0.196, -0.47],
+    [0.264, -0.511],
+    [0.319, -0.492],
+    [0.353, -0.415],
+    [0.37, -0.292],
+    [0.373, -0.16],
+    [0.374, 0.1],
+    [0.372, 0.275],
+    [0.363, 0.39],
+    [0.343, 0.475],
+    [0.308, 0.509],
+    [0.253, 0.516],
+    [0.204, 0.475],
+    [0.196, 0.425],
+    [0.196, -0.47],
+  ]
+  const g = new THREE.LatheGeometry(
+    profile.map(([r, h]) => new THREE.Vector2((r * frontRadius) / 0.374, h * frontWidth)),
+    80,
+  )
+  g.rotateX(Math.PI / 2)
+  add(g, rubber)
+  add(new THREE.CircleGeometry(0.219, 64), black, [0, 0, outer - 0.039])
+  ring(0, 0, outer - 0.012, 0.202, 0.011, satin)
+  ring(0, 0, outer + 0.003, 0.217, 0.004, sidewall)
+  ring(0, 0, outer + 0.005, 0.306, 0.0027, greyInk)
+  ring(0, 0, outer + 0.007, 0.249, 0.0026, sidewall)
+  const disk = new THREE.CylinderGeometry(0.144, 0.144, 0.014, 44)
+  disk.rotateX(Math.PI / 2)
+  add(disk, satin, [0, 0, outer - 0.026])
+  for (let i = 0; i < 12; i++) {
+    const a = (i * TAU) / 12
+    strut(
+      [Math.cos(a) * 0.065, Math.sin(a) * 0.065, outer + 0.009],
+      [Math.cos(a + 0.169) * 0.191, Math.sin(a + 0.169) * 0.191, outer - 0.007],
+      0.012,
+      spokes,
+    )
   }
-  // Softbox spill and narrow glints on the satin floor, baked with the tire contact shadows.
-  oval(179, 145, 171, 85, 0.24, '120,119,115')
-  oval(85, 142, 22, 60, 0.11, '176,174,169')
-  oval(259, 176, 84, 10, 0.10, '171,170,166')
-  oval(249, 132, 226, 66, 0.78)
-  oval(270, 127, 147, 33, 0.9)
-  for (const x of [136, 388]) for (const y of [81, 173]) oval(x, y, 31, 17, 0.84)
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.colorSpace = THREE.SRGBColorSpace
-  return texture
+  const nut = new THREE.CylinderGeometry(0.049, 0.055, 0.046, 8)
+  nut.rotateX(Math.PI / 2)
+  add(nut, titanium, [0, 0, outer + 0.009])
+  ball([0, 0, outer + 0.04], [0.024, 0.024, 0.008], black)
+  add(new THREE.PlaneGeometry(frontRadius * 2.05, frontRadius * 2.05), lettering, [0, 0, outer + 0.022])
+
+  const rollingParts: THREE.InstancedMesh[] = []
+  flushBatches((geometry, material) => {
+    const part = new THREE.InstancedMesh(geometry, material, wheels.length)
+    part.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    wheels.forEach((wheel, index) => part.setMatrixAt(index, wheel.matrix))
+    part.computeBoundingSphere()
+    // Spherical wheel bounds are invariant under the hub rotation.
+    rollingParts.push(part)
+    group.add(part)
+  })
+
+  function advanceWheels(distance: number, speed: number) {
+    exposure.value = THREE.MathUtils.smoothstep(speed, 2, 10)
+    spokes.opacity = 1 - 0.86 * exposure.value
+    if (!distance) return
+    for (const [index, wheel] of wheels.entries()) {
+      wheel.rotation.z = (wheel.rotation.z + distance / wheel.position.y) % TAU
+      wheel.updateMatrix()
+      for (const part of rollingParts) part.setMatrixAt(index, wheel.matrix)
+    }
+    for (const part of rollingParts) part.instanceMatrix.needsUpdate = true
+  }
+
+  return { group, materials, textures, advanceWheels }
 }
 
 /** Mount into a sized container. The caller controls the poster and its accessible label. */
-export function mountSculpture(host: HTMLElement, onReady: () => void): () => void {
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' })
+export function mountSculpture(
+  host: HTMLElement,
+  onReady: () => void,
+  revealStart?: number,
+  onUnavailable?: () => void,
+  onDeferred?: () => void,
+): () => void {
+  const surface = document.createElement('canvas')
+  const started = performance.now()
+  const context = surface.getContext('webgl2', { alpha: true, antialias: true, powerPreference: 'low-power' })
+  if (!context) throw new Error('WebGL 2 unavailable')
+  const info = context.getExtension('WEBGL_debug_renderer_info')
+  const software =
+    info &&
+    /swiftshader|llvmpipe|softpipe|basic render|software rasterizer|lavapipe/i.test(
+      String(context.getParameter(info.UNMASKED_RENDERER_WEBGL)),
+    )
+  const build = () =>
+    createStudio(
+      host,
+      new THREE.WebGLRenderer({ canvas: surface, context, alpha: true }),
+      onReady,
+      revealStart,
+    )
+  // Software shader compilation can occupy the main thread for the whole introduction.
+  // Keep the matching poster interactive through the reveal and reuse the same context afterwards.
+  const wait =
+    revealStart !== undefined && (software || performance.now() - started > 80)
+      ? revealStart + 2840 - performance.now()
+      : 0
+  if (wait <= 0) return build()
+  onDeferred?.()
+  let dispose: (() => void) | undefined
+  const timer = window.setTimeout(() => {
+    try {
+      dispose = build()
+    } catch {
+      context.getExtension('WEBGL_lose_context')?.loseContext()
+      surface.remove()
+      onUnavailable?.()
+    }
+  }, wait)
+  return () => {
+    clearTimeout(timer)
+    if (dispose) dispose()
+    else context.getExtension('WEBGL_lose_context')?.loseContext()
+  }
+}
+
+function createStudio(
+  host: HTMLElement,
+  renderer: THREE.WebGLRenderer,
+  onReady: () => void,
+  revealStart?: number,
+) {
   renderer.setClearColor(0, 0)
   renderer.transmissionResolutionScale = 0.5
   renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMappingExposure = 1.04
   const canvas = renderer.domElement
   canvas.style.cssText = 'display:block;width:100%;height:100%;touch-action:pan-y;'
@@ -784,21 +943,26 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
   const scene = new THREE.Scene()
   const car = carSculpture()
   scene.add(car.group)
-  const studio = studioEnvironment(),
-    pmrem = new THREE.PMREMGenerator(renderer)
-  const env = pmrem.fromEquirectangular(studio)
+  const env = studioEnvironment(renderer)
   scene.environment = env.texture
-  pmrem.dispose()
-  studio.dispose()
-  scene.add(new THREE.HemisphereLight(0xf0f0ed, 0x171717, 0.48))
+  scene.environmentIntensity = 0.83
+  scene.add(new THREE.HemisphereLight(0xf0f0ed, 0x141414, 0.23))
   // The front softbox grazes the nose and cockpit. Its feathered edge falls across the tail.
   const key = new THREE.SpotLight(0xfffaf3, 135, 14, 0.61, 0.86, 2)
+  key.name = 'Front softbox'
   key.position.set(-2.6, 3.7, 2.4)
   key.target.position.set(-0.57, 0.25, 0)
   scene.add(key, key.target)
   const rim = new THREE.DirectionalLight(0xe4e6e8, 1.6)
+  rim.name = 'Rear strip light'
   rim.position.set(-1.6, 3.2, -5.4)
   scene.add(rim)
+  const airflow = createAirflow()
+  scene.add(airflow.group)
+  const lightSurface = host.closest('.hero') ?? host
+  const pointer = new THREE.Vector2()
+  const lightOffset = new THREE.Vector2()
+  let lastPointerMove = -Infinity
   const motes = new THREE.BufferGeometry()
   const points = new Float32Array(38 * 3)
   for (let i = 0; i < 38; i++) {
@@ -817,16 +981,11 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
   })
   const mist = new THREE.Points(motes, mistMaterial)
   scene.add(mist)
-  const shade = studioFloorTexture()
-  const shadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(7, 4.2),
-    new THREE.MeshBasicMaterial({ map: shade, transparent: true, depthWrite: false }),
-  )
-  shadow.rotation.x = -Math.PI / 2
-  shadow.position.y = 0.004
-  scene.add(shadow)
-  const camera = new THREE.OrthographicCamera(-3.1, 3.1, 2, -2, 0.1, 40)
-  const aim = new THREE.Vector3(-0.13, 0.38, 0),
+  const road = createRollingRoad()
+  scene.add(road.mesh)
+  const standOff = 9.2
+  const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 40)
+  const aim = new THREE.Vector3(-0.33, 0.45, 0),
     motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   let visible = true,
     dead = false,
@@ -836,8 +995,12 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
     frame = 0,
     lastFrame = 0,
     elapsed = 0,
+    flowClock = 0,
     slow = 0
+  const hero = host.closest('.laboratory')
   let stillWhenIdle = false
+  let paused = false
+  let frameInterval = 1000 / 60 - 1
   let dragX = 0,
     dragY = 0,
     yaw = 0,
@@ -851,11 +1014,10 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
     if (width < 1 || height < 1) return
     renderer.setSize(width, height, false)
     const aspect = width / height,
-      halfWidth = Math.max(3.1, 1.22 * aspect)
-    camera.left = -halfWidth
-    camera.right = halfWidth
-    camera.top = halfWidth / aspect
-    camera.bottom = -camera.top
+      halfWidth = Math.max(2.82, 1.11 * aspect)
+    airflow.resize(width, halfWidth * 2, dpr)
+    camera.aspect = aspect
+    camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(halfWidth / (standOff * aspect)))
     camera.updateProjectionMatrix()
     dirty = true
     schedule()
@@ -866,43 +1028,71 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
   function draw(now: number) {
     frame = 0
     if (dead || !visible || document.hidden) return
-    if (!dirty && now - lastFrame < 42) {
+    if (!dirty && now - lastFrame < frameInterval) {
       schedule()
       return
     }
     const interval = lastFrame ? now - lastFrame : 42
     const dt = Math.min(0.1, interval / 1000)
-    elapsed += dt
     lastFrame = now
-    const staticCamera = motion.matches || stillWhenIdle
+    const staticCamera = motion.matches || stillWhenIdle || paused
+    if (!staticCamera) elapsed += dt
+    const inReveal = !staticCamera && revealStart !== undefined && hero?.classList.contains('is-revealing')
+    const shotTime = inReveal ? Math.max(0, (now - revealStart) / 1000) : 3
+    const overhead = 1 - THREE.MathUtils.smootherstep(shotTime, 0.42, 2.06)
+    road.setPulse(staticCamera ? -1 : (shotTime - 0.19) / 1.22)
+    const speed = staticCamera
+      ? 0
+      : 14 * THREE.MathUtils.smoothstep(elapsed, 0.05, 0.8) * THREE.MathUtils.smoothstep(shotTime, 0.48, 1.12)
+    const distance = speed * dt
+    flowClock += distance / 14
+    car.advanceWheels(distance, speed)
+    road.advance(distance, speed)
     const factor = staticCamera ? 1 : 1 - Math.exp(-dt * 11)
     yaw += (desiredYaw - yaw) * factor
     pitch += (desiredPitch - pitch) * factor
-    const azimuth =
-      -0.54 + yaw + (staticCamera ? 0 : 0.035 * Math.sin(elapsed * 0.225))
-    const elevation = 0.487 + pitch + (staticCamera ? 0 : 0.009 * Math.sin(elapsed * 0.16))
-    mist.position.x = staticCamera ? 0 : Math.sin(elapsed * 0.085) * 0.22
+    const azimuth = -1.045 + overhead * 0.90 + yaw + 0.024 * Math.sin(elapsed * 0.19)
+    const elevation = 0.19 + overhead * 1.27 + pitch + 0.01 * Math.sin(elapsed * 0.16)
+    const activePointer = !staticCamera && now - lastPointerMove < 1100
+    const damping = staticCamera ? 0 : 1 - Math.exp(-dt * (activePointer ? 3.6 : 1.45))
+    lightOffset.x += ((activePointer ? pointer.x : 0) - lightOffset.x) * damping
+    lightOffset.y += ((activePointer ? pointer.y : 0) - lightOffset.y) * damping
+    const sweep = Math.sin(elapsed * 0.24) * 0.25 + lightOffset.x * 0.62
+    const lift = Math.sin(elapsed * 0.17) * 0.16 + lightOffset.y * 0.72
+    key.position.set(-3.55 * Math.cos(0.74 + sweep - overhead * 1.08), 3.85 + lift, 3.55 * Math.sin(0.74 + sweep - overhead * 1.08))
+    key.target.position.set(-0.62 + sweep * 0.62, 0.28, lift * 0.12)
+    rim.position.set(-1.6 + sweep * 1.7, 3.2 - lift * 0.26, -5.4)
+    key.intensity = 135 * (motion.matches ? 1 : 0.27 + 0.73 * THREE.MathUtils.smoothstep(shotTime, 0.3, 1.14))
+    airflow.update(flowClock, staticCamera ? 1 : THREE.MathUtils.smoothstep(shotTime, 0.78, 1.65))
+    mist.position.x = Math.sin(elapsed * 0.085) * 0.22
+    // A little extra clearance at mid-descent keeps both wings inside the frame.
+    const clearance = Math.sin(Math.PI * overhead) * Math.max(0.11, (camera.aspect - 1.65) * 0.42)
+    const radius = standOff * (1 + 0.17 * overhead + clearance)
     camera.position.set(
-      aim.x + 9 * Math.sin(azimuth) * Math.cos(elevation),
-      aim.y + 9 * Math.sin(elevation),
-      9 * Math.cos(azimuth) * Math.cos(elevation),
+      aim.x + radius * Math.sin(azimuth) * Math.cos(elevation),
+      aim.y + radius * Math.sin(elevation),
+      radius * Math.cos(azimuth) * Math.cos(elevation),
     )
     camera.lookAt(aim)
     const started = performance.now()
     renderer.render(scene, camera)
-    if (performance.now() - started > 31 || (interval > 78 && interval < 300)) slow++
+    if (!staticCamera && !dirty && (performance.now() - started > 31 || interval > frameInterval * 2.25 + 12))
+      slow++
     else slow = Math.max(0, slow - 1)
     if (slow > 8) {
-      if (dpr > 0.85) {
+      if (frameInterval < 25) {
+        frameInterval = 1000 / 30 - 1
+      } else if (dpr > 0.85) {
         dpr = Math.max(0.85, dpr - 0.25)
         renderer.setPixelRatio(dpr)
+        resize()
       } else {
         stillWhenIdle = true
       }
       slow = 0
     }
     dirty = false
-    if ((!motion.matches && !stillWhenIdle) || dragging) schedule()
+    if (!staticCamera || dragging) schedule()
   }
   function start(e: PointerEvent) {
     if (e.button !== 0) return
@@ -915,7 +1105,7 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
   function move(e: PointerEvent) {
     if (!dragging || e.pointerId !== pointerId) return
     desiredYaw -= (e.clientX - dragX) * 0.008
-    desiredPitch = THREE.MathUtils.clamp(desiredPitch + (e.clientY - dragY) * 0.005, -0.33, 0.76)
+    desiredPitch = THREE.MathUtils.clamp(desiredPitch + (e.clientY - dragY) * 0.005, -0.095, 0.97)
     dragX = e.clientX
     dragY = e.clientY
     dirty = true
@@ -934,10 +1124,10 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
         desiredYaw -= 0.12
         break
       case 'ArrowUp':
-        desiredPitch = Math.min(0.76, desiredPitch + 0.07)
+        desiredPitch = Math.min(0.97, desiredPitch + 0.07)
         break
       case 'ArrowDown':
-        desiredPitch = Math.max(-0.33, desiredPitch - 0.07)
+        desiredPitch = Math.max(-0.095, desiredPitch - 0.07)
         break
       case 'Home':
         desiredYaw = desiredPitch = 0
@@ -957,6 +1147,24 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
     lastFrame = 0
     refresh()
   }
+  function inspectLight(event: PointerEvent) {
+    if (motion.matches || stillWhenIdle || paused || event.pointerType === 'touch') return
+    const bounds = lightSurface.getBoundingClientRect()
+    pointer.set(
+      THREE.MathUtils.clamp((2 * (event.clientX - bounds.left)) / bounds.width - 1, -1, 1),
+      THREE.MathUtils.clamp(1 - (2 * (event.clientY - bounds.top)) / bounds.height, -1, 1),
+    )
+    lastPointerMove = performance.now()
+    schedule()
+  }
+  function releaseLight() {
+    lastPointerMove = -Infinity
+  }
+  function toggleMotion(event: Event) {
+    paused = (event as CustomEvent<boolean>).detail
+    lastFrame = 0
+    refresh()
+  }
   function contextLost() {
     dead = true
     cancelAnimationFrame(frame)
@@ -967,10 +1175,13 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
   })
   const sizes = new ResizeObserver(resize)
   canvas.addEventListener('pointerdown', start)
+  lightSurface.addEventListener('pointermove', inspectLight as EventListener, { passive: true })
+  lightSurface.addEventListener('pointerleave', releaseLight)
   canvas.addEventListener('pointermove', move)
   canvas.addEventListener('lostpointercapture', stop)
   canvas.addEventListener('webglcontextlost', contextLost)
   host.addEventListener('keydown', orbitWithKeys)
+  host.addEventListener('studio-motion', toggleMotion)
   motion.addEventListener('change', refresh)
   document.addEventListener('visibilitychange', handleVisibility)
   viewport.observe(host)
@@ -984,24 +1195,27 @@ export function mountSculpture(host: HTMLElement, onReady: () => void): () => vo
     dead = true
     cancelAnimationFrame(frame)
     canvas.removeEventListener('pointerdown', start)
+    lightSurface.removeEventListener('pointermove', inspectLight as EventListener)
+    lightSurface.removeEventListener('pointerleave', releaseLight)
     canvas.removeEventListener('pointermove', move)
     canvas.removeEventListener('lostpointercapture', stop)
     motion.removeEventListener('change', refresh)
     canvas.removeEventListener('webglcontextlost', contextLost)
     host.removeEventListener('keydown', orbitWithKeys)
+    host.removeEventListener('studio-motion', toggleMotion)
     document.removeEventListener('visibilitychange', handleVisibility)
     viewport.disconnect()
     sizes.disconnect()
     car.group.traverse((item) => {
+      if (item instanceof THREE.InstancedMesh) item.dispose()
       if (item instanceof THREE.Mesh) item.geometry.dispose()
     })
     car.materials.forEach((m) => m.dispose())
     car.textures.forEach((t) => t.dispose())
     motes.dispose()
     mistMaterial.dispose()
-    shadow.geometry.dispose()
-    shadow.material.dispose()
-    shade.dispose()
+    airflow.dispose()
+    road.dispose()
     env.dispose()
     renderer.dispose()
     renderer.forceContextLoss()

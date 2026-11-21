@@ -1,42 +1,17 @@
-﻿import { useEffect, useRef, useState } from 'react'
-import { Orbit, Box, Layers3, ScanLine, RotateCcw } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Orbit, Box, Layers3, ScanLine, RotateCcw, Pause, Play } from 'lucide-react'
 
-function Airflow() {
-  return (
-    <svg className="airflow" viewBox="0 0 1000 440" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="flow">
-          <stop stopColor="#97b8db" stopOpacity="0" />
-          <stop offset=".24" stopColor="#9ebad3" stopOpacity=".32" />
-          <stop offset=".54" stopColor="#a1c7dd" stopOpacity=".06" />
-          <stop offset=".78" stopColor="#b8d1eb" stopOpacity=".32" />
-          <stop offset="1" stopColor="#6d92ba" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {Array.from({ length: 36 }, (_, i) => {
-        const y = 52 + i * 7.6
-        return (
-          <path
-            key={i}
-            d={`M -70 ${y + 64} C 145 ${y + 68}, 225 ${y + 53}, 365 ${y + 5} S 588 ${y - 54 + Math.sin(i * 0.1) * 18}, 695 ${y - 35} S 880 ${y - 32}, 1060 ${y - 73}`}
-            fill="none"
-            stroke="url(#flow)"
-            strokeWidth={i % 7 === 0 ? 1.1 : 0.58}
-          />
-        )
-      })}
-    </svg>
-  )
-}
-
-export default function Hero({ enter, revealing }: { enter: () => void; revealing: boolean }) {
+export default function Hero({ enter, revealing, skipReveal }: { enter: () => void; revealing: boolean; skipReveal: () => void }) {
   const host = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [deferred, setDeferred] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const [revealStart] = useState(() => (revealing ? performance.now() : undefined))
 
   useEffect(() => {
     const element = host.current
-    if (!element || revealing) return
+    if (!element) return
     let cancelled = false
     let dispose: (() => void) | undefined
     setReady(false)
@@ -49,10 +24,16 @@ export default function Hero({ enter, revealing }: { enter: () => void; revealin
     import('./sculpture')
       .then(({ mountSculpture }) => {
         if (!cancelled)
-          dispose = mountSculpture(element, () => {
-            setReady(true)
-            setFailed(false)
-          })
+          dispose = mountSculpture(
+            element,
+            () => {
+              setReady(true)
+              setFailed(false)
+            },
+            revealStart,
+            lost,
+            () => setDeferred(true),
+          )
       })
       .catch(() => {
         if (!cancelled) setFailed(true)
@@ -62,28 +43,38 @@ export default function Hero({ enter, revealing }: { enter: () => void; revealin
       element.removeEventListener('webglcontextlost', lost, true)
       dispose?.()
     }
-  }, [revealing])
+  }, [revealStart])
   return (
     <section className="hero">
-      <div className="hero-atmosphere" aria-hidden="true"><Airflow /></div>
+      <div className="hero-atmosphere" aria-hidden="true" />
       <div className="studio-light" aria-hidden="true" />
-      {revealing && <div className="ignition" aria-hidden="true"><i /><b /></div>}
+      {revealing && (
+        <div className="ignition" aria-hidden="true">
+          <i />
+          <b />
+          <span>DELTA F1</span>
+        </div>
+      )}
       <div className="stage" data-live={ready}>
-          <img
-            className="poster"
-            src="/sculpture.webp"
-            fetchPriority="high"
-            alt={ready ? '' : 'Black and pearl-white open-wheel sculpture under a studio spotlight'}
-          />
+        <img
+          className="poster"
+          src={revealing && !failed && !ready ? (deferred ? '/studio-descent.webp' : '/studio-overhead.webp') : '/sculpture.webp'}
+          fetchPriority="high"
+          alt={ready ? '' : 'Black and pearl-white open-wheel sculpture under a studio spotlight'}
+        />
         <div
           className="render-host"
           ref={host}
           tabIndex={ready ? 0 : -1}
           role="group"
-          aria-label="Black and pearl-white open-wheel study. Drag or use arrow keys to orbit. Press Home to reset."
+          aria-hidden={!ready}
+          aria-label="Open-wheel studio. Move the pointer to steer the light. Drag or use arrow keys to orbit. Press Home to reset."
         />
       </div>
       <div className="hero-shell shell">
+        {revealing && (
+          <button type="button" className="skip-reveal" onClick={skipReveal}>Skip intro</button>
+        )}
         <div className="hero-copy">
           <p className="kicker">
             <i /> MOTORSPORT ENGINEERING
@@ -107,21 +98,35 @@ export default function Hero({ enter, revealing }: { enter: () => void; revealin
           <span className="technical">
             <Box size={14} /> DF–01
           </span>
-          <span>Aero study</span>
+          <span>Illustrative airflow</span>
         </div>
-        <div className="stage-controls">
+        <div className="stage-controls" title={ready ? 'Move the pointer to steer the light. Drag to orbit.' : undefined}>
           <span>
             <Orbit size={17} />
             {failed ? 'Studio still' : ready ? 'Drag to orbit' : 'Loading studio'}
           </span>
           {ready && (
-            <button
-              title="Reset camera view"
-              aria-label="Reset camera view"
-              onClick={() => host.current?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }))}
-            >
-              <RotateCcw size={14} />
-            </button>
+            <>
+              <button
+                className="motion-toggle"
+                type="button"
+                aria-label={paused ? 'Resume studio motion' : 'Pause studio motion'}
+                title={paused ? 'Resume studio motion' : 'Pause studio motion'}
+                onClick={() => {
+                  host.current?.dispatchEvent(new CustomEvent('studio-motion', { detail: !paused }))
+                  setPaused(!paused)
+                }}
+              >
+                {paused ? <Play size={14} /> : <Pause size={14} />}
+              </button>
+              <button
+                title="Reset camera view"
+                aria-label="Reset camera view"
+                onClick={() => host.current?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }))}
+              >
+                <RotateCcw size={14} />
+              </button>
+            </>
           )}
         </div>
       </div>

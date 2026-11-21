@@ -180,9 +180,12 @@ export function Archive({
       {error ? (
         <ConnectionNotice error={error} retry={retry} />
       ) : !visible ? (
-        <p className="empty" role="status">
-          Connecting to the qualifying archive…
-        </p>
+        <div className="archive-pending">
+          <p role="status" className="loading-signal">Connecting to the qualifying archive…</p>
+          <div className="card-grid" aria-hidden="true">
+            {[0, 1, 2].map(index => <div key={index} className="pending-card"><i /><i /></div>)}
+          </div>
+        </div>
       ) : !visible.length ? (
         <p className="empty">
           {sessions?.length ? 'No sessions match this search.' : 'No qualifying sessions are stored.'}
