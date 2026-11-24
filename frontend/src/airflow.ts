@@ -333,5 +333,13 @@ export function createAirflow(axles: THREE.Vector4) {
       label.material.dispose()
     })
   }
-  return { group, paths, resize, update, dispose }
+  function sampleParticle(seed: number, time: number, out: THREE.Vector3) {
+    const row = seeds[2*seed]
+    const t = (seeds[2*seed+1] + time*(.24+.025*Math.sin(row))) % 1
+    const n = t*(samples-1), offset = 4*(row*samples+Math.floor(n)), f=n%1
+    const coord = (k: number) => THREE.MathUtils.lerp(table[offset+k], table[offset+4+k], f)
+    out.set(coord(0),coord(1),coord(2))
+    return t
+  }
+  return { group, paths, resize, update, sampleParticle, dispose }
 }

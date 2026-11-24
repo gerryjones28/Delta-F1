@@ -317,35 +317,35 @@ export default function App() {
           return <div className={outgoing ? 'route-outgoing' : 'route-body'} key={page}
             style={flight && (outgoing || flight.direction === 'return') ? {top:-flight.scroll} : undefined}
             inert={!!flight} aria-hidden={flight ? true : undefined}>
-        {page === 'overview' ? (<>
-            <InstrumentRail count={sessions?.length} />
-            <Archive sessions={sessions} error={result.error} retry={retry} />
-          </>
-        ) : page === 'archive' ? (
-          <Archive sessions={sessions} error={result.error} retry={retry} full />
-        ) : page === 'method' ? (
-          <Method />
-        ) : page.startsWith('session/') && session ? (
-          <Suspense fallback={<p className="shell empty loading-view" role="status">Loading lap comparison…</p>}>
-            <Workspace session={session} cue={cue} />
-          </Suspense>
-        ) : page.startsWith('session/') && !sessions ? (
-          <section className="shell archive">
-            {result.error ? (
-              <ConnectionNotice error={result.error} retry={retry} />
+            {page === 'overview' ? (<>
+                <InstrumentRail count={sessions?.length} />
+                <Archive sessions={sessions} error={result.error} retry={retry} />
+              </>
+            ) : page === 'archive' ? (
+              <Archive sessions={sessions} error={result.error} retry={retry} full />
+            ) : page === 'method' ? (
+              <Method />
+            ) : page.startsWith('session/') && session ? (
+              <Suspense fallback={<p className="shell empty loading-view" role="status">Loading lap comparison…</p>}>
+                <Workspace session={session} cue={cue} />
+              </Suspense>
+            ) : page.startsWith('session/') && !sessions ? (
+              <section className="shell archive">
+                {result.error ? (
+                  <ConnectionNotice error={result.error} retry={retry} />
+                ) : (
+                  <p className="empty loading-view" role="status">Opening session…</p>
+                )}
+              </section>
             ) : (
-              <p className="empty loading-view" role="status">Opening session…</p>
+              <section className="shell empty">
+                <h1>Session unavailable</h1>
+                <a className="ghost" href="#archive">
+                  Browse sessions
+                </a>
+              </section>
             )}
-          </section>
-        ) : (
-          <section className="shell empty">
-            <h1>Session unavailable</h1>
-            <a className="ghost" href="#archive">
-              Browse sessions
-            </a>
-          </section>
-        )}
-        </div>
+            </div>
         })}
       </main>
       <footer>

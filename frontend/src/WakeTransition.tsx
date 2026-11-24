@@ -58,7 +58,13 @@ function measurePage(page: Element, includeControls = false) {
     const matrix = outline?.getScreenCTM()
     const circuit = circuits[card.dataset.venue ?? '']
     const rect = card.getBoundingClientRect()
-    if (!outline || !matrix || !circuit || rect.top >= innerHeight || rect.bottom < 0) return
+    if (!outline || !matrix || !circuit) {
+      // A session without a mapped circuit can still contribute its real card border.
+      const panel = includeControls && card.closest<HTMLElement>('.session-card')
+      if (panel) addPanel(panel)
+      return
+    }
+    if (rect.top >= innerHeight || rect.bottom < 0) return
     const points = [...circuit.points,circuit.points[0]].map(([x,y]) => new DOMPoint(x,y).matrixTransform(matrix))
     groups.push({element:outline, rect, sides:[points], panel:false, info:card.parentElement?.querySelector('.card-info')})
   })

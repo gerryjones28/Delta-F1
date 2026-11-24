@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { createStudioNodes } from './studio-nodes'
 import { createAirflow } from './airflow'
 import { createRollingRoad } from './road'
 import { createStudioBloom } from './studio-bloom'
@@ -156,6 +157,7 @@ function createStudio(
   const axles = new THREE.Vector4(front.x, Math.abs(front.z), rear.x, Math.abs(rear.z))
   const airflow = createAirflow(axles)
   scene.add(airflow.group)
+  const nodes = createStudioNodes(host,axles)
   const lightSurface = host.closest('.hero') ?? host
   const pointer = new THREE.Vector2()
   const lightOffset = new THREE.Vector2()
@@ -237,6 +239,7 @@ function createStudio(
     launchShift = wide ? centerShift : 0
     const aspect = studioWidth / height,
       halfWidth = Math.max(2.82, 1.11 * aspect)
+    nodes.resize(width,height)
     airflow.resize(width, height, halfWidth * 2, dpr)
     camera.aspect = width / height
     camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(halfWidth / (standOff * aspect)))
@@ -386,6 +389,7 @@ function createStudio(
     }
     if (bloom) bloom.render(scene, camera, shutter)
     else renderer.render(scene, camera)
+    nodes.update(camera,flowClock,!staticCamera && !direction && shotTime>2.06,airflow.sampleParticle)
     if (!staticCamera && !dirty && (performance.now() - started > 31 || interval > frameInterval * 2.25 + 12))
       slow++
     else slow = Math.max(0, slow - 1)
@@ -419,6 +423,7 @@ function createStudio(
   }
   function inspectLight(event: PointerEvent) {
     if (hero?.dataset.flight || motion.matches || stillWhenIdle || paused || event.buttons !== 0 || event.pointerType === 'touch') return
+    nodes.point(event)
     const bounds = lightSurface.getBoundingClientRect()
     pointer.set(
       THREE.MathUtils.clamp((2 * (event.clientX - bounds.left)) / bounds.width - 1, -1, 1),
@@ -428,6 +433,7 @@ function createStudio(
     schedule()
   }
   function releaseLight() {
+    nodes.leave()
     pointer.set(0, 0)
     lastPointerMove = -Infinity
   }
@@ -472,6 +478,7 @@ function createStudio(
     disposeVehicle(car)
     motes.dispose()
     mistMaterial.dispose()
+    nodes.dispose()
     airflow.dispose()
     road.dispose()
     bloom?.dispose()

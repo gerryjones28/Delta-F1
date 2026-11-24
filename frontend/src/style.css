@@ -574,12 +574,16 @@ h2 {
   border: 1px solid #38383a;
   background: var(--glass);
   box-shadow: var(--edge);
+}
+.session-card,
+.method-grid article {
   transition:
     transform .45s var(--ease-studio),
     border-color .4s,
     box-shadow .4s;
 }
-.session-card:hover {
+.session-card:hover,
+.method-grid article:is(:hover, :focus-within) {
   transform: translateY(-3px);
   border-color: #656569;
   box-shadow: inset 0 1px 0 #ffffff1c, 0 12px 28px #0007;
@@ -1176,6 +1180,8 @@ thead {
   margin-top: 30px;
 }
 .method-grid article {
+  position: relative;
+  overflow: hidden;
   padding: 25px;
 }
 .method-grid article > svg {
@@ -1706,7 +1712,8 @@ thead {
 }
 
 /* The archive glazing catches the same narrow strip as the hero. */
-.session-card::before {
+.session-card::before,
+.method-grid article::before {
   content: '';
   position: absolute;
   inset: 0 8% auto;
@@ -1715,7 +1722,8 @@ thead {
   pointer-events: none;
   background: linear-gradient(90deg, transparent, #eeede434 32%, #c4c9ca0d 64%, transparent);
 }
-.session-card::after {
+.session-card::after,
+.method-grid article::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -1739,7 +1747,8 @@ thead {
   transition: border-color .32s, box-shadow .32s, background-color .32s;
 }
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .session-card:hover::after, .session-card:focus-visible::after {animation: glass-sweep 1s var(--ease-studio)}
+  .session-card:hover::after, .session-card:focus-visible::after,
+  .method-grid article:is(:hover, :focus-within)::after {animation: glass-sweep 1s var(--ease-studio)}
   .stage-controls:hover, .connection:hover {border-color: #ffffff45; box-shadow: inset 0 1px 0 #ffffff20}
   @keyframes glass-sweep {
     0% {opacity: 0; transform: translateX(-102%)}
@@ -1902,3 +1911,18 @@ thead {
 [data-flight=transfer] :is(.full-archive,.workspace){animation:none}
 @keyframes release-page{0%,8%{opacity:1}49%,100%{opacity:0}}
 @keyframes receive-page{0%,46%{opacity:0}90%,100%{opacity:1}}
+
+.studio-node {
+  position:absolute; top:0; left:0; pointer-events:none; opacity:0;
+  padding-left:13px; margin-top:-12px; color:#e1e4e5;
+  font:500 10px/1 var(--mono); letter-spacing:.05em;
+  text-shadow:0 1px 3px #000; transition:opacity .16s ease-out;
+}
+.studio-node::before {
+  content:""; position:absolute; left:1px; top:11px; width:11px; height:1px;
+  background:currentColor; opacity:.65; transform-origin:left; transform:rotate(-32deg);
+}
+.part-node::after {content:"+";position:absolute;left:-3px;top:7px;font-size:9px}
+.particle-node {font-size:9px}
+[data-flight] .studio-node {visibility:hidden}
+@media (prefers-reduced-motion:reduce) { .studio-node {display:none} }
