@@ -66,10 +66,10 @@ export async function request<T>(url: string, signal: AbortSignal, body?: string
   })
   if (!response.ok) {
     if (response.status >= 500)
-      throw new Error('The telemetry service is unavailable. Check the local API and database connection.')
+      throw new Error('Could not load the data. Check the API and database connection.')
     const data = await response.json().catch(() => ({}))
     throw new Error(
-      typeof data.detail === 'string' ? data.detail : 'The service could not process this selection.',
+      typeof data.detail === 'string' ? data.detail : 'Could not load this selection.',
     )
   }
   return response.json()
@@ -92,7 +92,7 @@ export function useQuery<T>(url: string | null, revision = 0, body?: string) {
             error:
               error instanceof Error && !(error instanceof TypeError)
                 ? error.message
-                : 'Unable to connect to the telemetry service.',
+                : 'Could not connect to the API.',
           })
       })
     return () => controller.abort()

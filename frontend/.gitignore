@@ -2,3 +2,8 @@ node_modules/
 dist/
 .vite/
 *.local
+
+# Locally supplied model sources and derived previews awaiting redistribution clearance.
+/f1_2022_textured_studio.blend
+/f1_2022_for_livery_design.rar
+/.local-vehicle/

@@ -69,6 +69,7 @@ if __package__ in (None, ""):  # allow `python src/load/telemetry_importer.py`
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.paths import PROJECT_ROOT
+from src.load.circuit_aliases import circuit_matches
 
 ARCHIVE_ROOT = PROJECT_ROOT / "data/external/tracinginsights-2025"
 F1DB_DIR = PROJECT_ROOT / "data/raw/f1db-csv"
@@ -310,7 +311,7 @@ def fetch_openf1_session(session_key: int, race: dict) -> dict:
             f"OpenF1 session {session_key} is from {record.get('year')}, "
             f"F1DB race is {race['year']}"
         )
-    if normalise(record.get("circuit_short_name")) != normalise(race["circuit"]):
+    if not circuit_matches(race["circuit"], record.get("circuit_short_name")):
         raise ValidationError(
             f"OpenF1 session {session_key} is at {record.get('circuit_short_name')!r} but the "
             f"F1DB race is at {race['circuit']!r} - refusing to guess"

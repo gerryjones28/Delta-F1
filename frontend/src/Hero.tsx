@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Orbit, Box, Layers3, ScanLine, RotateCcw, Pause, Play } from 'lucide-react'
+import { studioAsset } from './vehicle-source'
+import { Box, Layers3, ScanLine, Pause, Play } from 'lucide-react'
 
 export default function Hero({ enter, revealing, skipReveal }: { enter: () => void; revealing: boolean; skipReveal: () => void }) {
   const host = useRef<HTMLDivElement>(null)
@@ -8,6 +9,13 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
   const [deferred, setDeferred] = useState(false)
   const [paused, setPaused] = useState(false)
   const [revealStart] = useState(() => (revealing ? performance.now() : undefined))
+
+  useEffect(() => {
+    if (!revealing || ready || failed || revealStart === undefined) return
+    // Cover a slow first GLB fetch with the same camera path while the decoder warms up.
+    const timer = window.setTimeout(() => setDeferred(true), Math.max(0, revealStart + 200 - performance.now()))
+    return () => window.clearTimeout(timer)
+  }, [revealing, ready, failed, revealStart])
 
   useEffect(() => {
     const element = host.current
@@ -58,17 +66,20 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
       <div className="stage" data-live={ready}>
         <img
           className="poster"
-          src={revealing && !failed && !ready ? (deferred ? '/studio-descent.webp' : '/studio-overhead.webp') : '/sculpture.webp'}
+          src={studioAsset(revealing && !failed ? (deferred ? 'studio-descent.webp' : 'studio-overhead.webp') : 'sculpture.webp')}
+          onError={event => {
+            const image = event.currentTarget
+            if (new URL(image.src).pathname.startsWith('/local-vehicle/')) image.src = '/sculpture.webp'
+          }}
           fetchPriority="high"
-          alt={ready ? '' : 'Black and pearl-white open-wheel sculpture under a studio spotlight'}
+          alt={ready ? '' : 'Black and pearl-white Formula car under a studio spotlight'}
         />
         <div
           className="render-host"
           ref={host}
-          tabIndex={ready ? 0 : -1}
-          role="group"
+          role="img"
           aria-hidden={!ready}
-          aria-label="Open-wheel studio. Move the pointer to steer the light. Drag or use arrow keys to orbit. Press Home to reset."
+          aria-label="Pearl-white and black Formula car on a rolling road with illustrative airflow."
         />
       </div>
       <div className="hero-shell shell">
@@ -77,57 +88,43 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
         )}
         <div className="hero-copy">
           <p className="kicker">
-            <i /> MOTORSPORT ENGINEERING
+            <i /> DATABASE PROJECT
           </p>
           <h1>
-            Telemetry
+            Compare{' '}
             <br />
             <em>
-              Laboratory<span>.</span>
+              qualifying laps<span>.</span>
             </em>
           </h1>
           <p className="hero-desc">
-            A precision workspace for Formula 1 qualifying analysis. Explore every sector, trace and time
-            delta.
+            Explore Formula 1 qualifying data and compare drivers using lap times, sector times, speed, throttle, and braking.
           </p>
           <button className="primary" onClick={enter}>
-            <ScanLine size={18} /> Enter workspace
+            <ScanLine size={18} /> Explore sessions
           </button>
         </div>
         <div className="scene-tag">
           <span className="technical">
-            <Box size={14} /> DF–01
+            <Box size={14} /> 3D model
           </span>
-          <span>Illustrative airflow</span>
+          <span>Airflow model</span>
         </div>
-        <div className="stage-controls" title={ready ? 'Move the pointer to steer the light. Drag to orbit.' : undefined}>
-          <span>
-            <Orbit size={17} />
-            {failed ? 'Studio still' : ready ? 'Drag to orbit' : 'Loading studio'}
-          </span>
-          {ready && (
-            <>
-              <button
-                className="motion-toggle"
-                type="button"
-                aria-label={paused ? 'Resume studio motion' : 'Pause studio motion'}
-                title={paused ? 'Resume studio motion' : 'Pause studio motion'}
-                onClick={() => {
-                  host.current?.dispatchEvent(new CustomEvent('studio-motion', { detail: !paused }))
-                  setPaused(!paused)
-                }}
-              >
-                {paused ? <Play size={14} /> : <Pause size={14} />}
-              </button>
-              <button
-                title="Reset camera view"
-                aria-label="Reset camera view"
-                onClick={() => host.current?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }))}
-              >
-                <RotateCcw size={14} />
-              </button>
-            </>
-          )}
+        <div className="stage-controls">
+          {ready ? (
+            <button
+              className="motion-toggle"
+              type="button"
+              aria-label={paused ? 'Resume studio motion' : 'Pause studio motion'}
+              onClick={() => {
+                host.current?.dispatchEvent(new CustomEvent('studio-motion', { detail: !paused }))
+                setPaused(!paused)
+              }}
+            >
+              {paused ? <Play size={13} /> : <Pause size={13} />}
+              {paused ? 'Resume motion' : 'Pause motion'}
+            </button>
+          ) : <span>{failed ? 'Still image' : 'Loading car'}</span>}
         </div>
       </div>
     </section>
@@ -142,18 +139,18 @@ export function InstrumentRail({ count }: { count?: number }) {
           <span className="rail-bars" aria-hidden="true">
             ▂▅▃▇▄▆▃
           </span>
-          <span>Signal processing</span>
-          <strong>Sector-anchored</strong>
+          <span>Timing</span>
+          <strong>By sector</strong>
         </div>
         <div>
           <Layers3 size={15} />
-          <span>Resolution</span>
+          <span>Sampling</span>
           <strong>500 points / lap</strong>
         </div>
         <div>
           <span className="square-icon" aria-hidden="true" />
           <span>Archive</span>
-          <strong>{count === undefined ? 'Awaiting link' : count + ' sessions'}</strong>
+          <strong>{count === undefined ? '—' : count + ' sessions'}</strong>
         </div>
       </div>
     </div>

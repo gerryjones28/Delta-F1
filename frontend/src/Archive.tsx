@@ -134,10 +134,10 @@ export function Archive({
       <div className="section-head">
         <div>
           <p className="section-label">
-            <FolderOpen size={14} /> SESSION DIRECTORY
+            <FolderOpen size={14} /> QUALIFYING · MOSTLY 2025
           </p>
           <h2>
-            Session archive<span className="heading-dot">.</span>
+            Sessions<span className="heading-dot">.</span>
           </h2>
         </div>
         {!full ? (
@@ -181,7 +181,7 @@ export function Archive({
         <ConnectionNotice error={error} retry={retry} />
       ) : !visible ? (
         <div className="archive-pending">
-          <p role="status" className="loading-signal">Connecting to the qualifying archive…</p>
+          <p role="status" className="loading-signal">Loading qualifying sessions…</p>
           <div className="card-grid" aria-hidden="true">
             {[0, 1, 2].map(index => <div key={index} className="pending-card"><i /><i /></div>)}
           </div>
@@ -214,7 +214,7 @@ export function SessionFacts({ session }: { session: Session }) {
       </span>
       <span>
         <Flag />
-        Best recorded {lapTime(session.best_lap_s)}
+        Fastest lap {lapTime(session.best_lap_s)}
       </span>
     </div>
   )

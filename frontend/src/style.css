@@ -422,13 +422,7 @@ main:focus {
   width: 100%;
   height: 100%;
 }
-.render-host {
-  cursor: grab;
-}
-.render-host:active {
-  cursor: grabbing;
-}
-.stage[data-live='false'] .render-host {cursor: default}
+.render-host { pointer-events: none }
 .hero:has(.stage[data-live='true']) .ignition b {visibility:hidden}
 .poster {
   object-fit: contain;
@@ -438,9 +432,6 @@ main:focus {
   height: auto;
   inset: 50% auto auto 50%;
   transform: translate(-50%, -50%);
-}
-.render-host:focus-visible {
-  outline-offset: -4px;
 }
 .scene-tag,
 .stage-controls {
@@ -500,8 +491,7 @@ main:focus {
   gap: 6px;
 }
 .stage-controls button {
-  border-left: 1px solid #5b6978;
-  padding: 0 0 0 8px;
+  padding: 0;
 }
 .instrument {
   background: linear-gradient(180deg,#151515,#101011 22%,#0d0d0e);
@@ -1771,7 +1761,7 @@ thead {
   @keyframes signal-ident {0%,100%{opacity:0} 23%,45%{opacity:.64}}
 }
 @media (prefers-reduced-motion:reduce) {
-  .stage-controls .motion-toggle {display:none}
+  .stage-controls:has(.motion-toggle) {display:none}
 }
 @media(max-width:365px) {
   .archive:not(.full-archive) .section-head h2{font-size:25px}
@@ -1859,3 +1849,56 @@ thead {
   .pending-card::before, .loading-signal::before, .loading-view::before { animation: data-scan 1.55s linear infinite }
   @keyframes data-scan { from {background-position: 180% 50%} to {background-position: -40% 50%} }
 }
+
+#main {position:relative}
+.studio-layer[hidden]{display:none}
+[data-flight="launch"] .studio-layer{position:absolute;inset:0 0 auto;z-index:4;pointer-events:none}
+.skip-flight{position:absolute;right:4vw;top:16px;z-index:7}
+
+.wake-transition{position:absolute;inset:0 0 auto;width:100%;height:clamp(370px,58vh,660px);pointer-events:none;z-index:5;overflow:hidden}
+[data-flight=launch] .wake-transition{animation:wake-out 1.58s linear both}
+[data-flight=return] .wake-transition{animation:wake-in 1.58s linear both}
+[data-flight=launch] .studio-layer{animation:depart-studio 1.58s ease both}
+[data-flight=launch] .hero-shell{animation:launch-copy .35s ease-in both}
+[data-flight=return] .hero-shell{animation:restore-copy 1.58s ease both}
+[data-flight=launch] .route-body{animation:analysis-arrival 1.58s ease both}
+[data-flight=return] .studio-layer .stage{animation:catch-light 1.58s ease both}
+[data-flight=return] .route-body{animation:restore-copy 1.58s ease both}
+[data-flight=launch] :is(.archive-tools,.card-grid,.pairing){animation:analysis-arrival 1.58s .10s ease backwards}
+@keyframes depart-studio{0%,67%{opacity:1}93%,100%{opacity:0}}
+@keyframes launch-copy{to{opacity:0;transform:translateX(-12px)}}
+@keyframes restore-copy{0%,55%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:none}}
+@keyframes analysis-arrival{0%,65%{opacity:0}100%{opacity:1}}
+@keyframes catch-light{0%{opacity:.15}48%,100%{opacity:1}}
+@keyframes wake-out{0%,30%{opacity:0}53%{opacity:.18}69%{opacity:.66}100%{opacity:0}}
+@keyframes wake-in{0%{opacity:.56}32%{opacity:.38}78%,100%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.route-body{animation:route-dissolve .14s linear}@keyframes route-dissolve{from{opacity:.65}to{opacity:1}}}
+
+@media(prefers-reduced-motion:no-preference){
+  .pairing .driver-controls,.traces .trace{animation:instrument-arrival .38s ease backwards}
+  .pairing .driver-controls:nth-child(2),.traces .trace:nth-of-type(2){animation-delay:55ms}
+  .traces .trace:nth-of-type(3){animation-delay:90ms}
+  .traces .trace:nth-of-type(4){animation-delay:125ms}
+  @keyframes instrument-arrival{from{opacity:.18;transform:translateY(5px)}}
+}
+
+[data-flight=launch] .hero{background:transparent;border-bottom-color:transparent}
+[data-flight=launch] .hero-atmosphere{animation:launch-atmosphere 1.58s linear both}
+@keyframes launch-atmosphere{0%,23%{opacity:1}65%,100%{opacity:0}}
+[data-flight=launch] .stage{left:0;right:0;mask-image:none}
+.circuit-handoff{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:5}
+/* The strand endpoints are measured in the settled panel coordinate system. */
+[data-flight] .methodology{animation:none}
+[data-flight=launch] .card-art .outline{animation:outline-arrival 1.58s linear both}
+@keyframes outline-arrival{0%,89%{opacity:0}100%{opacity:1}}
+
+[data-flight=return] .route-body{position:absolute;left:0;right:0;z-index:3;pointer-events:none;animation:release-archive 1.58s linear both}
+[data-flight=return] .studio-layer{animation:reacquire-studio 1.58s ease both}
+@keyframes release-archive{0%,12%{opacity:1}46%,100%{opacity:0}}
+@keyframes reacquire-studio{0%,10%{opacity:0}47%,100%{opacity:1}}
+
+[data-flight=transfer] .route-outgoing{position:absolute;inset-inline:0;z-index:2;pointer-events:none;animation:release-page 1.42s ease both}
+[data-flight=transfer] .route-body{animation:receive-page 1.42s ease both}
+[data-flight=transfer] :is(.full-archive,.workspace){animation:none}
+@keyframes release-page{0%,8%{opacity:1}49%,100%{opacity:0}}
+@keyframes receive-page{0%,46%{opacity:0}90%,100%{opacity:1}}

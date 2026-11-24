@@ -1,4 +1,4 @@
-﻿# Delta F1 Telemetry Laboratory
+# Delta F1 Telemetry Laboratory
 
 From the repository root, start the existing FastAPI service in one PowerShell terminal.
 
@@ -20,7 +20,17 @@ The dev and preview servers proxy `/api` to `http://127.0.0.1:8000`. To use anot
 
 `npm.cmd run build` type-checks the frontend and creates the production bundle in `dist`. Use `npm.cmd run preview` to serve that bundle locally.
 
-The control-room sculpture has pointer and keyboard orbit, a Home-key camera reset, reduced-motion support, and a local WebP fallback. Each circuit schematic uses independently projected venue coordinates. Geographic provenance and license terms are in [the circuit data credits](public/licenses/circuits.txt).
+The control-room sculpture uses a fixed hero angle, damped cursor parallax, reduced-motion support, and a local WebP fallback. Each circuit schematic uses independently projected venue coordinates. Geographic provenance and license terms are in [the circuit data credits](public/licenses/circuits.txt).
 
-Studio sound is opt-in. The local build includes the supplied *Liminal* MP3. Before public deployment, verify the recording's public-use and redistribution rights with its rights holder and retain the license.
+Studio sound attempts low-volume playback once, honors a saved mute, and waits for the sound switch if the browser blocks autoplay. The local build includes the supplied *Liminal* MP3. Before public deployment, verify the recording's public-use and redistribution rights with its rights holder and retain the license.
 
+The local vehicle preview uses Peter Kiss’s F1 2022 Concept car. The supplied download contains no redistribution license document. Confirm the applicable rights for serving a downloadable derivative before public use. The local Vite dev and preview servers serve the GLB and its posters on loopback. The distributable build uses the procedural car outside localhost. [Original model listing](https://www.cgtrader.com/free-3d-models/car/racing-car/f1-2022-concept-car)
+
+The source scene stays intact. To regenerate the optimized local mesh with Blender 4.3, run this from the frontend directory, then restart Vite.
+
+```powershell
+blender -b --factory-startup -Y f1_2022_textured_studio.blend --python-exit-code 1 --python tools/export_vehicle.py -- .local-vehicle/vehicle.glb
+blender -b --factory-startup -Y f1_2022_textured_studio.blend --python-exit-code 1 --python tools/export_vehicle.py -- .local-vehicle/vehicle-compact.glb --compact
+```
+
+The homepage opens directly in the animated hybrid view. For the standalone photograph, open `/studio-still.html` in the local preview. It freezes the vehicle and camera and accumulates 384 samples per pixel using five bounces. The animated hero uses cached studio reflections and shadows and drops postprocessing under sustained frame pressure.

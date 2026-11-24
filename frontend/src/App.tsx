@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { flushSync } from 'react-dom'
+import { WakeHandoff } from './WakeTransition'
 import Hero, { InstrumentRail } from './Hero'
 import { SoundControls, useStudioSound } from './Sound'
 import { Archive, ConnectionNotice } from './Archive'
@@ -21,7 +22,7 @@ import { useQuery, type Session } from './api'
 const Workspace = lazy(() => import('./Workspace'))
 function Brand() {
   return (
-    <a href="#overview" className="brand" aria-label="Delta F1 overview">
+    <a href="#overview" className="brand" aria-label="Delta F1 home">
       <img src="/delta.svg" alt="" />
       <span>
         DELTA <b>F1</b>
@@ -33,43 +34,31 @@ function Method() {
   return (
     <section className="shell methodology">
       <p className="section-label">
-        <BookOpen size={15} /> ANALYSIS NOTES
+        <BookOpen size={15} /> PROJECT NOTES
       </p>
       <h1>
-        Methodology<span className="heading-dot">.</span>
+        About the data<span className="heading-dot">.</span>
       </h1>
       <div className="method-grid">
         <article>
           <Flag />
-          <h2>Recorded timing</h2>
-          <p>
-            Lap durations and the three sector splits come directly from the stored timing records. Compare
-            the two laps at each timing line using the measured table.
-          </p>
+          <h2>The project</h2>
+          <p>I built Delta F1 for a graduate database project. It combines historical Formula 1 data with telemetry to compare qualifying laps. The database contains selected sessions, mostly from 2025.</p>
         </article>
         <article>
           <ChartNoAxesCombined />
-          <h2>Aligned telemetry</h2>
-          <p>
-            The service aligns each sector on a common distance axis and samples the overlapping trace at 500
-            positions. Speed, throttle, brake and cumulative delta share this axis.
-          </p>
+          <h2>Data sources</h2>
+          <p>F1DB provides historical information about drivers, events, and circuits. OpenF1 provides session and timing data through its API. TracingInsights archives lap telemetry. These sources can share underlying timing and telemetry records.</p>
         </article>
         <article>
           <Activity />
-          <h2>Reading the delta</h2>
-          <p>
-            Delta is reference minus comparison. A positive value means the reference lap took longer to reach
-            that position. Use the reported uncertainty to judge whether a change is distinguishable.
-          </p>
+          <h2>How it works</h2>
+          <p>I import the data into PostgreSQL hosted on Supabase. A Python backend built with FastAPI serves the stored records to a React frontend. Three.js renders the car and circuit views. The site shows past sessions and updates only when I import more data.</p>
         </article>
         <article>
           <Layers3 />
-          <h2>Coverage and geography</h2>
-          <p>
-            Traces end where shared coverage ends. The scrubber follows estimated distance along the lap.
-            Circuit schematics show the venue layout independently of the telemetry.
-          </p>
+          <h2>What the times mean</h2>
+          <p>Lap and sector times are recorded at timing lines. Between those lines, the charts use telemetry to estimate the time difference. Some laps have gaps or no usable telemetry, so an exact time gain at a corner cannot be read from the charts.</p>
           <a href="/licenses/circuits.txt" target="_blank" rel="noreferrer">
             Circuit data credits
           </a>
@@ -83,17 +72,31 @@ function getRoute() {
 }
 export default function App() {
   const sound = useStudioSound()
-  const { cue } = sound
+  const { cue, pass } = sound
   const [route, setRoute] = useState(getRoute)
   const [revealing, setRevealing] = useState(
     () => getRoute() === 'overview' && !matchMedia('(prefers-reduced-motion: reduce)').matches,
   )
+  const [studioVisited, setStudioVisited] = useState(() => getRoute() === 'overview')
+  const [flight, setFlight] = useState<{direction: 'launch' | 'return' | 'transfer'; start: number; source: string; scroll: number} | null>(null)
   const [revision, setRevision] = useState(0)
   const [menu, setMenu] = useState(false)
   const [statusOpen, setStatusOpen] = useState(false)
   const result = useQuery<{ sessions: Session[] }>('/api/sessions', revision)
   const sessions = result.data?.sessions
   const retry = () => setRevision((v) => v + 1)
+  // Prepare the return shot during idle time once the destination page is usable.
+  useEffect(() => {
+    const ready = route === 'method' || (route === 'archive' && !!sessions)
+    if (studioVisited || !ready || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const prepare = () => setStudioVisited(true)
+    if (typeof window.requestIdleCallback === 'function') {
+      const idle = window.requestIdleCallback(prepare, {timeout: 2000})
+      return () => window.cancelIdleCallback(idle)
+    }
+    const timer = window.setTimeout(prepare, 500)
+    return () => window.clearTimeout(timer)
+  }, [route, sessions, studioVisited])
   useEffect(() => {
     if (!revealing) return
     const finish = () => setRevealing(false)
@@ -113,14 +116,30 @@ export default function App() {
     }
   }, [revealing])
   useEffect(() => {
+    // The router scrolls after commit. Keep Back from restoring Home's scroll
+    // before the return transition measures the outgoing Sessions grid.
+    const restoration = history.scrollRestoration
+    history.scrollRestoration = 'manual'
     let previous = getRoute()
     let generation = 0
     let transition: ViewTransition | undefined
     const navigate = async () => {
       const next = getRoute()
+      if (next === previous) return
+      const hasWake = (path: string) => path === 'method' || path === 'archive' || path.startsWith('session/')
+      const direction = previous === 'overview' && hasWake(next) ? 'launch'
+        : next === 'overview' && hasWake(previous) ? 'return'
+        : (next === 'method' || previous === 'method') && hasWake(previous) && hasWake(next) ? 'transfer' : null
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
+      const cinematic = direction && !reducedMotion &&
+        !document.querySelector('.laboratory[data-flight]') &&
+        (direction === 'transfer' || (!!document.querySelector('.stage[data-live="true"] .render-host:not([data-static])') &&
+          !document.querySelector('[aria-label="Resume studio motion"]')))
       cue('navigate')
       const request = ++generation
       const venue = (next.startsWith('session/') ? next : previous).split('/')[1]
+      const source = previous
+      const scroll = window.scrollY
       previous = next
       const markVenue = () => {
         if (!venue) return
@@ -130,6 +149,8 @@ export default function App() {
       const commit = () => {
         if (request !== generation) return
         flushSync(() => {
+          if (next === 'overview') setStudioVisited(true)
+          setFlight(cinematic && direction ? {direction, start: performance.now(), source, scroll} : null)
           setRoute(next)
           setMenu(false)
           setStatusOpen(false)
@@ -138,9 +159,18 @@ export default function App() {
         if (main && !document.startViewTransition) main.classList.add('route-arrival')
         window.scrollTo({ top: 0, behavior: 'instant' })
         main?.focus({ preventScroll: true })
+        if (reducedMotion && direction && (source === 'method' || next === 'method')) {
+          // Echo the handoff with stationary light on the destination geometry.
+          if (next === 'method') {
+            main?.querySelectorAll('.method-grid article').forEach(panel =>
+              panel.animate([{borderColor:'#747678'}, {}], {duration:240, easing:'ease-out'}))
+          } else if (next === 'overview') {
+            main?.querySelector('.studio-light')?.animate([{opacity:.65}, {opacity:1}], {duration:240})
+          }
+        }
       }
       transition?.skipTransition()
-      if (!document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      if (direction || !document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) {
         commit()
         return
       }
@@ -157,6 +187,7 @@ export default function App() {
     }
     window.addEventListener('hashchange', navigate)
     return () => {
+      history.scrollRestoration = restoration
       generation++
       transition?.skipTransition()
       window.removeEventListener('hashchange', navigate)
@@ -173,11 +204,28 @@ export default function App() {
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   }, [menu, statusOpen])
+  useEffect(() => {
+    if (!flight) return
+    const stopAudio = flight.direction === 'transfer' ? undefined : pass(flight.direction === 'return')
+    const finish = () => setFlight(null)
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') finish() }
+    const motion = matchMedia('(prefers-reduced-motion: reduce)')
+    const timer = window.setTimeout(finish, Math.max(0, flight.start + (flight.direction === 'transfer' ? 1420 : flight.direction === 'launch' ? 1840 : 1580) - performance.now()))
+    motion.addEventListener('change', finish)
+    window.addEventListener('keydown', escape)
+    return () => {
+      stopAudio?.()
+      clearTimeout(timer)
+      motion.removeEventListener('change', finish)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [flight, pass])
   const active = route.startsWith('session/') ? 'archive' : route
   const state = sessions ? 'online' : result.error ? 'offline' : 'connecting'
-  const session = sessions?.find((s) => 'session/' + encodeURIComponent(s.id) === route)
+  const bodyRoute = flight?.direction === 'return' ? flight.source : route
+  const layers = flight?.direction === 'transfer' ? [flight.source, route] : [bodyRoute]
   return (
-    <div className={revealing && route === 'overview' ? 'laboratory is-revealing' : 'laboratory'}>
+    <div data-flight={flight?.direction} data-flight-start={flight?.start} className={revealing && route === 'overview' ? 'laboratory is-revealing' : 'laboratory'}>
       <a
         className="skip"
         href="#main"
@@ -193,9 +241,9 @@ export default function App() {
           <Brand />
           <nav aria-label="Main navigation" className={menu ? 'open' : ''}>
             {[
-              ['overview', 'Control room'],
-              ['archive', 'Session archive'],
-              ['method', 'Methodology'],
+              ['overview', 'Home'],
+              ['archive', 'Sessions'],
+              ['method', 'About the data'],
             ].map(([id, label]) => (
               <a
                 key={id}
@@ -219,7 +267,7 @@ export default function App() {
               }}
             >
               <span />
-              {state === 'online' ? 'System online' : state === 'offline' ? 'API offline' : 'Connecting'}
+              {state === 'online' ? 'Loaded' : state === 'offline' ? 'Offline' : 'Loading'}
             </button>
             <button
               className="menu-button"
@@ -236,24 +284,23 @@ export default function App() {
               <div className="status-pop">
                 <div>
                   {sessions ? <Check size={17} /> : <Unplug size={17} />}
-                  <strong>Telemetry connection</strong>
+                  <strong>Database connection</strong>
                 </div>
                 <p>
                   {sessions
-                    ? sessions.length + ' qualifying sessions available via the local API.'
-                    : result.error || 'Requesting the session archive…'}
+                    ? sessions.length + ' qualifying sessions in the database.'
+                    : result.error || 'Loading sessions…'}
                 </p>
                 <button className="ghost" onClick={retry}>
-                  Refresh connection
+                  Check again
                 </button>
               </div>
             )}
           </div>
         </div>
       </header>
-      <main id="main" tabIndex={-1} key={route}>
-        {route === 'overview' ? (
-          <>
+      <main id="main" tabIndex={-1}>
+        {studioVisited && <div className="studio-layer" hidden={route !== 'overview' && (!flight || flight.direction === 'transfer')} inert={route !== 'overview' || !!flight}>
             <Hero
               revealing={revealing}
               skipReveal={() => setRevealing(false)}
@@ -261,18 +308,28 @@ export default function App() {
                 window.location.hash = 'archive'
               }}
             />
+        </div>}
+        {flight && <WakeHandoff key={flight.start} direction={flight.direction} start={flight.start} />}
+        {flight && <button className="skip-flight ghost" type="button" onClick={() => {setFlight(null); document.getElementById('main')?.focus()}}>Skip transition</button>}
+        {layers.map(page => {
+          const outgoing = flight?.direction === 'transfer' && page === flight.source
+          const session = sessions?.find(s => 'session/' + encodeURIComponent(s.id) === page)
+          return <div className={outgoing ? 'route-outgoing' : 'route-body'} key={page}
+            style={flight && (outgoing || flight.direction === 'return') ? {top:-flight.scroll} : undefined}
+            inert={!!flight} aria-hidden={flight ? true : undefined}>
+        {page === 'overview' ? (<>
             <InstrumentRail count={sessions?.length} />
             <Archive sessions={sessions} error={result.error} retry={retry} />
           </>
-        ) : route === 'archive' ? (
+        ) : page === 'archive' ? (
           <Archive sessions={sessions} error={result.error} retry={retry} full />
-        ) : route === 'method' ? (
+        ) : page === 'method' ? (
           <Method />
-        ) : route.startsWith('session/') && session ? (
-          <Suspense fallback={<p className="shell empty loading-view" role="status">Opening analysis workspace…</p>}>
+        ) : page.startsWith('session/') && session ? (
+          <Suspense fallback={<p className="shell empty loading-view" role="status">Loading lap comparison…</p>}>
             <Workspace session={session} cue={cue} />
           </Suspense>
-        ) : route.startsWith('session/') && !sessions ? (
+        ) : page.startsWith('session/') && !sessions ? (
           <section className="shell archive">
             {result.error ? (
               <ConnectionNotice error={result.error} retry={retry} />
@@ -284,18 +341,20 @@ export default function App() {
           <section className="shell empty">
             <h1>Session unavailable</h1>
             <a className="ghost" href="#archive">
-              Browse session archive
+              Browse sessions
             </a>
           </section>
         )}
+        </div>
+        })}
       </main>
       <footer>
         <div className="shell">
           <span>
-            <AudioWaveform size={16} /> DELTA F1 <i /> Telemetry Laboratory
+            <AudioWaveform size={16} /> DELTA F1 <i /> Graduate database project
           </span>
           <span>
-            <Database size={13} /> Read-only data service
+            <Database size={13} /> Historical qualifying data
           </span>
         </div>
       </footer>

@@ -10,7 +10,7 @@ const channels = [
   { key: 'speed_kmh', label: 'Speed', unit: 'km/h' },
   { key: 'throttle_pct', label: 'Throttle', unit: '%' },
   { key: 'brake', label: 'Brake', unit: '0 / 1' },
-  { key: 'delta_s', label: 'Cumulative delta', unit: 's' },
+  { key: 'delta_s', label: 'Estimated time difference', unit: 's' },
 ] as const
 type Channel = (typeof channels)[number]
 
@@ -182,10 +182,10 @@ export default function Traces({ data }: { data: Comparison }) {
   return (
     <section className="traces">
       <p className="section-label">
-        <Activity size={14} /> INTERPOLATED TELEMETRY
+        <Activity size={14} /> LAP COMPARISON
       </p>
       <h2>
-        Aligned traces<span className="heading-dot">.</span>
+        Telemetry by lap progress<span className="heading-dot">.</span>
       </h2>
       <p className="quality-line">
         {data.meta.grid_points} samples · Shared coverage{' '}

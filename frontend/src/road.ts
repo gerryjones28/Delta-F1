@@ -46,23 +46,26 @@ function asphaltTexture() {
   return texture
 }
 
-export function createRollingRoad() {
+export function createRollingRoad(axles: THREE.Vector4) {
   const asphalt = asphaltTexture()
   const distance = { value: 0 }
   const exposure = { value: 0 }
+  const vehicleOffset = { value: 0 }
   const pulse = { value: -1 }
   const material = new THREE.MeshPhysicalMaterial({
     color: 0x202022,
     metalness: 0,
-    roughness: 0.92,
-    specularIntensity: 0.26,
+    roughness: 0.86,
+    specularIntensity: 0.55,
     transparent: true,
     depthWrite: false,
   })
   material.onBeforeCompile = (shader) => {
     shader.uniforms.roadTexture = { value: asphalt }
+    shader.uniforms.axles = { value: axles }
     shader.uniforms.travel = distance
     shader.uniforms.roadExposure = exposure
+    shader.uniforms.vehicleOffset = vehicleOffset
     shader.uniforms.roadPulse = pulse
     shader.vertexShader = 'varying vec2 roadPosition;\n' + shader.vertexShader
     shader.vertexShader = shader.vertexShader.replace(
@@ -73,9 +76,10 @@ export function createRollingRoad() {
       `
       varying vec2 roadPosition;
       uniform sampler2D roadTexture;
+      uniform vec4 axles;
       uniform float travel;
       uniform float roadExposure;
-      uniform float roadPulse;
+      uniform float roadPulse, vehicleOffset;
     ` + shader.fragmentShader
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <color_fragment>',
@@ -85,7 +89,7 @@ export function createRollingRoad() {
       vec2 asphaltUv = vec2(p.x - travel, p.y);
       vec3 grit = texture2D(roadTexture, asphaltUv * vec2(0.72, 1.12)).rgb;
       float binder = texture2D(roadTexture, asphaltUv * vec2(0.09, 0.54) + 0.37).g;
-      float lanes = 1.0 - smoothstep(0.05, 0.31, abs(abs(p.y) - 0.80));
+      float lanes = 1.0 - smoothstep(0.05, 0.31, abs(abs(p.y) - mix(axles.y, axles.w, smoothstep(axles.x, axles.z, p.x))));
       float streak = texture2D(roadTexture, asphaltUv * vec2(0.045, 1.12)).r;
       float aggregate = (0.52 + 1.25 * mix(grit.r, streak, roadExposure * 0.69)) * (0.82 + 0.35 * binder);
       // Occasional flecks sit on the belt border. The broken line and grain share the same travel.
@@ -100,7 +104,7 @@ export function createRollingRoad() {
       '#include <roughnessmap_fragment>',
       `
       #include <roughnessmap_fragment>
-      roughnessFactor = clamp(roughnessFactor + (binder-0.5)*0.12 - lanes*0.1, 0.5, 0.99);
+      roughnessFactor = clamp(roughnessFactor + (binder-0.5)*0.19 - lanes*(0.23+0.07*streak), 0.48, 0.97);
     `,
     )
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -110,19 +114,23 @@ export function createRollingRoad() {
       vec2 grainUv = asphaltUv * vec2(0.72,1.12);
       vec2 slope = vec2(texture2D(roadTexture,grainUv+vec2(1.0/256.0,0.0)).r,
                         texture2D(roadTexture,grainUv+vec2(0.0,1.0/256.0)).r)-grit.rr;
-      normal = normalize(normal - mat3(viewMatrix)*vec3(slope.x,0.0,slope.y)*mix(0.14,0.055,roadExposure));
+      normal = normalize(normal - mat3(viewMatrix)*vec3(slope.x,0.0,slope.y)*mix(0.19,0.075,roadExposure));
     `,
     )
     // Apply contact occlusion after physical lighting, so highlights cannot lift the tire patches.
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <opaque_fragment>',
       `
-      vec2 axle = abs(vec2(min(abs(p.x + 1.743), abs(p.x - 1.654)), abs(p.y) - 0.800));
+      float chassisX = p.x - vehicleOffset;
+      vec2 hub = abs(chassisX - axles.x) < abs(chassisX - axles.z) ? axles.xy : axles.zw;
+      vec2 axle = vec2(chassisX, abs(p.y)) - hub;
       vec2 footprint = axle / vec2(0.17, 0.22);
       float contact = exp(-dot(footprint, footprint));
-      vec2 hull = (p - vec2(0.16, -0.06)) / vec2(2.05, 0.69);
+      vec2 hull = (p - vec2(0.16 + vehicleOffset, -0.06)) / vec2(2.05, 0.69);
       float bodyShade = exp(-dot(hull, hull));
-      outgoingLight *= (1.0 - 0.92 * contact) * (1.0 - 0.73 * bodyShade);
+      vec2 penumbra = (axle - vec2(0.06, 0.016)) / vec2(0.41, 0.31);
+      float tireShade = exp(-dot(penumbra, penumbra));
+      outgoingLight *= (1.0 - 0.89 * contact) * (1.0 - 0.39 * tireShade) * (1.0 - 0.78 * bodyShade);
       // A pulse of grazing light travels across the aggregate once on entry.
       if (roadPulse >= 0.0 && roadPulse < 1.0) {
         float radius = 5.8 * (1.0 - pow(1.0 - roadPulse, 2.0));
@@ -142,6 +150,7 @@ export function createRollingRoad() {
   mesh.renderOrder = -5
   return {
     mesh,
+    setVehicleOffset(x: number) { vehicleOffset.value = x },
     setPulse(progress: number) {
       pulse.value = progress
     },

@@ -92,12 +92,14 @@ GRAND_PRIX_FOLDERS = {
     "singapore": "Singapore Grand Prix",
     "united-states": "United States Grand Prix",
     "mexico": "Mexico City Grand Prix",
-    "sao-paulo": "São Paulo Grand Prix",
+    "sao-paulo": "SÃ£o Paulo Grand Prix",
     "las-vegas": "Las Vegas Grand Prix",
     "qatar": "Qatar Grand Prix",
     "abu-dhabi": "Abu Dhabi Grand Prix",
 }
 
+
+from src.load.circuit_aliases import circuit_matches
 
 def load_calendar(year: int = YEAR) -> list[dict]:
     """F1DB calendar rows for one season."""
@@ -236,7 +238,7 @@ def build_rows(conn, races: list[dict], sessions: list[dict],
             blockers.append("qualifying session absent from the archive")
         if matched is None:
             blockers.append(match_note)
-        elif normalise(matched["circuit"]) != normalise(race["circuit"]):
+        elif not circuit_matches(race["circuit"], matched["circuit"]):
             blockers.append(
                 f"circuit alias needed (OpenF1 {matched['circuit']!r} vs F1DB {race['circuit']!r})"
             )
@@ -269,10 +271,22 @@ def build_rows(conn, races: list[dict], sessions: list[dict],
     return rows
 
 
+def budget_order(row: dict, frontier: int) -> tuple[bool, int]:
+    """Priority used by the executor: season frontier first, then backfill by round.
+
+    Budget has to be spent in the same order the events will be imported, otherwise
+    the early backfill rounds consume it and the later rounds are marked blocked
+    even though they would have been imported first.
+    """
+    return (row["round"] <= frontier, row["round"])
+
+
 def apply_budget(rows: list[dict], current_mb: float, budget_mb: float) -> None:
     """Mark ready rows that would push the database past the configured budget."""
+    imported_rounds = [row["round"] for row in rows if row["state"] == "imported"]
+    frontier = max(imported_rounds) if imported_rounds else 0
     projected = current_mb
-    for row in sorted(rows, key=lambda item: item["round"]):
+    for row in sorted(rows, key=lambda item: budget_order(item, frontier)):
         if row["state"] != "ready":
             continue
         if projected + row["est_mb"] > budget_mb:

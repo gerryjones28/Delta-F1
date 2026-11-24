@@ -57,7 +57,7 @@ function DriverControls({
         Driver
         <div className="select-wrap">
           <select aria-label={side + ' driver'} value={code} onChange={(e) => setCode(e.target.value)}>
-            {!drivers.length && <option value="">Awaiting drivers</option>}
+            {!drivers.length && <option value="">No drivers available</option>}
             {drivers.map((d) => (
               <option key={d.driver_code} value={d.driver_code}>
                 {d.driver_code} · {d.full_name}
@@ -77,7 +77,7 @@ function DriverControls({
             onChange={(e) => selection.select(Number(e.target.value))}
           >
             {!selection.chosen && (
-              <option value="">{selection.laps ? 'No eligible laps' : 'Awaiting laps'}</option>
+              <option value="">{selection.laps ? 'No comparable laps' : 'Loading laps…'}</option>
             )}
             {selection.laps?.map((l) => (
               <option key={l.lap_number} value={l.lap_number} disabled={!l.eligible}>
@@ -100,10 +100,10 @@ function Results({ data }: { data: Comparison }) {
       <div className="section-head">
         <div>
           <p className="section-label">
-            <Timer size={14} /> OFFICIAL RECORDED TIMING
+            <Timer size={14} /> RECORDED TIMES
           </p>
           <h2>
-            Timing comparison<span className="heading-dot">.</span>
+            Lap and sector times<span className="heading-dot">.</span>
           </h2>
         </div>
       </div>
@@ -118,7 +118,7 @@ function Results({ data }: { data: Comparison }) {
             </div>
           ))}
           <div>
-            <span>LAP DELTA</span>
+            <span>LAP TIME DIFFERENCE</span>
             <strong>
               {signed(m.lap_delta_s)} <small>s</small>
             </strong>
@@ -136,7 +136,7 @@ function Results({ data }: { data: Comparison }) {
                 <th>
                   {meta.compare.driver_code} · L{meta.compare.lap_number}
                 </th>
-                <th>Delta (s)</th>
+                <th>Difference (s)</th>
               </tr>
             </thead>
             <tbody>
@@ -152,7 +152,7 @@ function Results({ data }: { data: Comparison }) {
           </table>
         </div>
         <p className="sign-note">
-          Δ = reference − comparison. Positive values mean the reference took longer.
+          Time difference is reference minus comparison. A positive value means the reference lap was slower. A negative value means it was faster.
         </p>
       </div>
       {!coverage.complete_lap && (
@@ -235,7 +235,7 @@ export default function Workspace({ session, cue }: { session: Session; cue: (ty
     <section className="shell workspace">
       <a className="back" href="#archive">
         <ChevronLeft size={15} />
-        Session archive
+        Back to sessions
       </a>
       <div className="workspace-intro">
         <div>
@@ -260,7 +260,7 @@ export default function Workspace({ session, cue }: { session: Session; cue: (ty
           <Gauge size={14} /> COMPARISON SETUP
         </p>
         <h2>
-          Lap pairing<span className="heading-dot">.</span>
+          Choose two laps<span className="heading-dot">.</span>
         </h2>
       </div>
       <div className="pairing">
@@ -271,17 +271,17 @@ export default function Workspace({ session, cue }: { session: Session; cue: (ty
       <div className="run-row">
         <button className="primary" onClick={run} disabled={!spec || busy}>
           <Activity size={17} />
-          {busy ? 'Aligning laps…' : 'Compare laps'}
+          {busy ? 'Comparing laps…' : 'Compare laps'}
         </button>
         <span role="status" className={busy || (!drivers.data && !error) ? 'loading-signal' : undefined}>
           {same
             ? 'Select two different laps.'
             : busy
-              ? 'Fetching sector-aligned telemetry.'
+              ? 'Loading telemetry for both laps.'
               : !drivers.data && !error
                 ? 'Loading session drivers…'
                 : !list.length && drivers.data
-                  ? 'No stored drivers.'
+                  ? 'No drivers found for this session.'
                   : ''}
         </span>
       </div>

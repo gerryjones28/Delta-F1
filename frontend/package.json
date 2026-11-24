@@ -16,6 +16,8 @@
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "three": "0.174.0",
+    "three-gpu-pathtracer": "0.0.23",
+    "three-mesh-bvh": "0.8.3",
     "uplot": "^1.6.32"
   },
   "devDependencies": {
