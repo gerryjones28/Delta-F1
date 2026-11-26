@@ -1,12 +1,9 @@
 import * as THREE from 'three'
 
 // A quarter-size highlight buffer keeps the glow local to the vehicle's HDR softbox reflections.
-export function createStudioBloom(renderer: THREE.WebGLRenderer) {
+export function createStudioBloom(renderer: THREE.WebGLRenderer, silhouette: THREE.Texture) {
   const beauty = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 })
   const highlights = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false })
-  // Only the car writes this mask. The depth-tested silhouette includes the spinning wheels.
-  const mask = new THREE.WebGLRenderTarget(1, 1)
-  const matte = new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.DoubleSide})
   const shutter = new THREE.Vector2()
   const pixel = new THREE.Vector2()
   const vertexShader = `varying vec2 uvScreen;
@@ -24,7 +21,7 @@ export function createStudioBloom(renderer: THREE.WebGLRenderer) {
         +bright(vec2(-1.,1.))+bright(vec2(1.,-1.))),1.);}`,
   })
   const composite = new THREE.ShaderMaterial({
-    uniforms: { source: { value: beauty.texture }, highlights: { value: highlights.texture }, silhouette: { value: mask.texture }, shutter: { value: shutter }, pixel: { value: pixel } },
+    uniforms: { source: { value: beauty.texture }, highlights: { value: highlights.texture }, silhouette: { value: silhouette }, shutter: { value: shutter }, pixel: { value: pixel } },
     depthTest: false, depthWrite: false, vertexShader,
     fragmentShader: `varying vec2 uvScreen; uniform sampler2D source, highlights, silhouette; uniform vec2 pixel, shutter;
       void main() {
@@ -65,7 +62,6 @@ export function createStudioBloom(renderer: THREE.WebGLRenderer) {
   const camera = new THREE.Camera()
   return {
     resize(width: number, height: number) {
-      mask.setSize(Math.ceil(width/2), Math.ceil(height/2))
       beauty.setSize(width, height)
       highlights.setSize(Math.max(1,Math.ceil(width/4)), Math.max(1,Math.ceil(height/4)))
       pixel.set(1/width,1/height)
@@ -74,16 +70,6 @@ export function createStudioBloom(renderer: THREE.WebGLRenderer) {
       renderer.setRenderTarget(beauty)
       renderer.render(scene, lens)
       shutter.copy(velocity)
-      if (shutter.lengthSq() > 0) {
-        const layers = lens.layers.mask
-        const override = scene.overrideMaterial
-        lens.layers.set(2)
-        scene.overrideMaterial = matte
-        renderer.setRenderTarget(mask)
-        renderer.render(scene, lens)
-        scene.overrideMaterial = override
-        lens.layers.mask = layers
-      }
       renderer.setRenderTarget(highlights)
       pass.material = extract
       renderer.render(pass, camera)
@@ -92,8 +78,6 @@ export function createStudioBloom(renderer: THREE.WebGLRenderer) {
       renderer.render(pass, camera)
     },
     dispose() {
-      mask.dispose()
-      matte.dispose()
       beauty.dispose()
       highlights.dispose()
       triangle.dispose()

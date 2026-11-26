@@ -2,10 +2,8 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   Activity,
   AudioWaveform,
-  BookOpen,
   ChartNoAxesCombined,
   Check,
-  Database,
   Flag,
   Layers3,
   Menu,
@@ -13,7 +11,8 @@ import {
   X,
 } from 'lucide-react'
 import { flushSync } from 'react-dom'
-import { WakeHandoff } from './WakeTransition'
+import { WakeHandoff, measurePage, type ContourGroup } from './WakeTransition'
+import { observePageCopy } from './type-motion'
 import Hero, { InstrumentRail } from './Hero'
 import { SoundControls, useStudioSound } from './Sound'
 import { Archive, ConnectionNotice } from './Archive'
@@ -33,9 +32,6 @@ function Brand() {
 function Method() {
   return (
     <section className="shell methodology">
-      <p className="section-label">
-        <BookOpen size={15} /> PROJECT NOTES
-      </p>
       <h1>
         About the data<span className="heading-dot">.</span>
       </h1>
@@ -78,16 +74,22 @@ export default function App() {
     () => getRoute() === 'overview' && !matchMedia('(prefers-reduced-motion: reduce)').matches,
   )
   const [studioVisited, setStudioVisited] = useState(() => getRoute() === 'overview')
-  const [flight, setFlight] = useState<{direction: 'launch' | 'return' | 'transfer'; start: number; source: string; scroll: number} | null>(null)
+  const [flight, setFlight] = useState<{direction: 'launch' | 'return' | 'transfer'; start: number; source: string; scroll: number; sourceTop: number; captured: ContourGroup[]} | null>(null)
   const [revision, setRevision] = useState(0)
   const [menu, setMenu] = useState(false)
   const [statusOpen, setStatusOpen] = useState(false)
   const result = useQuery<{ sessions: Session[] }>('/api/sessions', revision)
   const sessions = result.data?.sessions
   const retry = () => setRevision((v) => v + 1)
+  // The preview can be ready before its local sessions API finishes starting.
+  useEffect(() => {
+    if (!result.error || revision >= 3) return
+    const timer = window.setTimeout(() => setRevision(v => v + 1), 1500 * 2 ** revision)
+    return () => window.clearTimeout(timer)
+  }, [result.error, revision])
   // Prepare the return shot during idle time once the destination page is usable.
   useEffect(() => {
-    const ready = route === 'method' || (route === 'archive' && !!sessions)
+    const ready = route === 'method' || ((route === 'archive' || route.startsWith('session/')) && !!sessions)
     if (studioVisited || !ready || matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const prepare = () => setStudioVisited(true)
     if (typeof window.requestIdleCallback === 'function') {
@@ -127,9 +129,11 @@ export default function App() {
       const next = getRoute()
       if (next === previous) return
       const hasWake = (path: string) => path === 'method' || path === 'archive' || path.startsWith('session/')
-      const direction = previous === 'overview' && hasWake(next) ? 'launch'
+      const stage = document.querySelector('.stage')?.getBoundingClientRect()
+      const carVisible = stage && stage.bottom > stage.height * .24 && stage.top < innerHeight
+      const direction = previous === 'overview' && hasWake(next) ? (carVisible ? 'launch' : 'transfer')
         : next === 'overview' && hasWake(previous) ? 'return'
-        : (next === 'method' || previous === 'method') && hasWake(previous) && hasWake(next) ? 'transfer' : null
+        : hasWake(previous) && hasWake(next) ? 'transfer' : null
       const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
       const cinematic = direction && !reducedMotion &&
         !document.querySelector('.laboratory[data-flight]') &&
@@ -140,6 +144,9 @@ export default function App() {
       const venue = (next.startsWith('session/') ? next : previous).split('/')[1]
       const source = previous
       const scroll = window.scrollY
+      const outgoing = document.querySelector('.route-body')
+      const sourceTop = outgoing ? outgoing.getBoundingClientRect().top - (document.querySelector('#main')!.getBoundingClientRect().top + scroll) : -scroll
+      const captured = cinematic && outgoing && direction !== 'launch' ? measurePage(outgoing,true) : []
       previous = next
       const markVenue = () => {
         if (!venue) return
@@ -150,13 +157,13 @@ export default function App() {
         if (request !== generation) return
         flushSync(() => {
           if (next === 'overview') setStudioVisited(true)
-          setFlight(cinematic && direction ? {direction, start: performance.now(), source, scroll} : null)
+          setFlight(cinematic && direction ? {direction, start: performance.now(), source, scroll, sourceTop, captured} : null)
           setRoute(next)
           setMenu(false)
           setStatusOpen(false)
         })
         const main = document.getElementById('main')
-        if (main && !document.startViewTransition) main.classList.add('route-arrival')
+        if (main && !cinematic && !document.startViewTransition) main.classList.add('route-arrival')
         window.scrollTo({ top: 0, behavior: 'instant' })
         main?.focus({ preventScroll: true })
         if (reducedMotion && direction && (source === 'method' || next === 'method')) {
@@ -213,19 +220,36 @@ export default function App() {
     const timer = window.setTimeout(finish, Math.max(0, flight.start + (flight.direction === 'transfer' ? 1420 : flight.direction === 'launch' ? 1840 : 1580) - performance.now()))
     motion.addEventListener('change', finish)
     window.addEventListener('keydown', escape)
+    window.addEventListener('resize', finish)
     return () => {
       stopAudio?.()
       clearTimeout(timer)
       motion.removeEventListener('change', finish)
       window.removeEventListener('keydown', escape)
+      window.removeEventListener('resize', finish)
     }
   }, [flight, pass])
   const active = route.startsWith('session/') ? 'archive' : route
+  useEffect(()=>{
+    if(flight || revealing) return
+    const body=document.querySelector('.route-body')
+    if(!body) return
+    const selector=route.startsWith('session/') ? '.workspace-intro' : '.methodology,.archive'
+    const page=body.querySelector(selector)
+    if(page) return observePageCopy(page)
+    // On a direct session link the workspace can arrive after the route commit.
+    let stop:(()=>void) | undefined
+    const pending=new MutationObserver(()=>{
+      const loaded=body.querySelector(selector)
+      if(loaded) { pending.disconnect(); stop=observePageCopy(loaded) }
+    })
+    pending.observe(body,{childList:true,subtree:true})
+    return ()=>{pending.disconnect();stop?.()}
+  },[route,flight,revealing])
   const state = sessions ? 'online' : result.error ? 'offline' : 'connecting'
-  const bodyRoute = flight?.direction === 'return' ? flight.source : route
-  const layers = flight?.direction === 'transfer' ? [flight.source, route] : [bodyRoute]
+  const layers = flight ? [flight.source, route] : [route]
   return (
-    <div data-flight={flight?.direction} data-flight-start={flight?.start} className={revealing && route === 'overview' ? 'laboratory is-revealing' : 'laboratory'}>
+    <div data-flight={flight?.direction} data-scrolled={flight && flight.scroll > 0 || undefined} data-flight-start={flight?.start} className={revealing && route === 'overview' ? 'laboratory is-revealing' : 'laboratory'}>
       <a
         className="skip"
         href="#main"
@@ -300,7 +324,7 @@ export default function App() {
         </div>
       </header>
       <main id="main" tabIndex={-1}>
-        {studioVisited && <div className="studio-layer" hidden={route !== 'overview' && (!flight || flight.direction === 'transfer')} inert={route !== 'overview' || !!flight}>
+        {studioVisited && <div className="studio-layer" style={flight?.direction==='launch' ? {top:-flight.scroll} : undefined} hidden={route !== 'overview' && (!flight || flight.direction === 'transfer')} inert={route !== 'overview' || !!flight}>
             <Hero
               revealing={revealing}
               skipReveal={() => setRevealing(false)}
@@ -309,13 +333,13 @@ export default function App() {
               }}
             />
         </div>}
-        {flight && <WakeHandoff key={flight.start} direction={flight.direction} start={flight.start} />}
+        {flight && <WakeHandoff key={flight.start} direction={flight.direction} start={flight.start} captured={flight.captured} />}
         {flight && <button className="skip-flight ghost" type="button" onClick={() => {setFlight(null); document.getElementById('main')?.focus()}}>Skip transition</button>}
         {layers.map(page => {
-          const outgoing = flight?.direction === 'transfer' && page === flight.source
+          const outgoing = flight && page === flight.source
           const session = sessions?.find(s => 'session/' + encodeURIComponent(s.id) === page)
           return <div className={outgoing ? 'route-outgoing' : 'route-body'} key={page}
-            style={flight && (outgoing || flight.direction === 'return') ? {top:-flight.scroll} : undefined}
+            style={outgoing ? {top:flight.sourceTop} : undefined}
             inert={!!flight} aria-hidden={flight ? true : undefined}>
             {page === 'overview' ? (<>
                 <InstrumentRail count={sessions?.length} />
@@ -351,10 +375,7 @@ export default function App() {
       <footer>
         <div className="shell">
           <span>
-            <AudioWaveform size={16} /> DELTA F1 <i /> Graduate database project
-          </span>
-          <span>
-            <Database size={13} /> Historical qualifying data
+            <AudioWaveform size={16} /> DELTA F1
           </span>
         </div>
       </footer>

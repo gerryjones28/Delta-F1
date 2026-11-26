@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, ChevronDown, ChevronLeft, Flag, Gauge, Layers3, Timer } from 'lucide-react'
+import { Activity, AlertTriangle, ChevronDown, ChevronLeft, Flag, Layers3, Timer } from 'lucide-react'
 import { circuits, SessionFacts } from './Archive'
 import { lapTime, signed, useQuery, type Comparison, type Driver, type Lap, type Session } from './api'
 import CircuitView from './CircuitView'
@@ -93,7 +93,7 @@ function DriverControls({
   )
 }
 
-function Results({ data }: { data: Comparison }) {
+function Results({ data, sessionId }: { data: Comparison; sessionId:string }) {
   const { meta, measured: m, coverage, uncertainty } = data
   return (
     <div className="results">
@@ -165,7 +165,7 @@ function Results({ data }: { data: Comparison }) {
           </p>
         </div>
       )}
-      <Traces data={data} />
+      <Traces data={data} sessionId={sessionId} />
       <details className="limitations">
         <summary>
           <Layers3 size={16} /> Coverage, uncertainty and limitations
@@ -178,6 +178,10 @@ function Results({ data }: { data: Comparison }) {
           {uncertainty.note} Changes below {uncertainty.stated_seconds.toFixed(3)} s are within the stated
           alignment uncertainty.
         </p>
+        <p>Replay follows the reference lap clock. Both markers show aligned lap progress.</p>
+        {!coverage.complete_lap && <p>Readings hold at the last available sample when telemetry ends early.</p>}
+        {!data.estimated.series.reference.positions?.some(Boolean) && <p>Reference lap coordinates unavailable.</p>}
+        {!data.estimated.series.compare.positions?.some(Boolean) && <p>Comparison lap coordinates unavailable.</p>}
         <ul>
           {[...new Set([...coverage.notes, ...data.limitations])].map((s) => (
             <li key={s}>{s}</li>
@@ -253,12 +257,9 @@ export default function Workspace({ session, cue }: { session: Session; cue: (ty
           )}
           <SessionFacts session={session} />
         </div>
-        {circuits[session.id] && <CircuitView circuit={circuits[session.id]} sessionId={session.id} />}
+        {!result.data && circuits[session.id] && <CircuitView circuit={circuits[session.id]} sessionId={session.id} />}
       </div>
       <div className="pair-header">
-        <p className="section-label">
-          <Gauge size={14} /> COMPARISON SETUP
-        </p>
         <h2>
           Choose two laps<span className="heading-dot">.</span>
         </h2>
@@ -286,7 +287,7 @@ export default function Workspace({ session, cue }: { session: Session; cue: (ty
         </span>
       </div>
       {active && result.error && <ErrorLine message={result.error} retry={run} />}
-      {active && result.data && <Results data={result.data} />}
+      {active && result.data && <Results data={result.data} sessionId={session.id} />}
     </section>
   )
 }

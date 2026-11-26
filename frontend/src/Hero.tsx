@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { studioAsset } from './vehicle-source'
-import { Box, Layers3, ScanLine, Pause, Play } from 'lucide-react'
+import { startTypeMotion } from './type-motion'
+import { Layers3, ScanLine, Pause, Play } from 'lucide-react'
 
 export default function Hero({ enter, revealing, skipReveal }: { enter: () => void; revealing: boolean; skipReveal: () => void }) {
   const host = useRef<HTMLDivElement>(null)
@@ -9,6 +10,11 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
   const [deferred, setDeferred] = useState(false)
   const [paused, setPaused] = useState(false)
   const [revealStart] = useState(() => (revealing ? performance.now() : undefined))
+  useEffect(() => {
+    const hero=host.current?.closest('.hero')
+    if(revealing && hero && revealStart!==undefined)
+      return startTypeMotion(hero,'intro',revealStart).dispose
+  },[revealing,revealStart])
 
   useEffect(() => {
     if (!revealing || ready || failed || revealStart === undefined) return
@@ -87,9 +93,6 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
           <button type="button" className="skip-reveal" onClick={skipReveal}>Skip intro</button>
         )}
         <div className="hero-copy">
-          <p className="kicker">
-            <i /> DATABASE PROJECT
-          </p>
           <h1>
             Compare{' '}
             <br />
@@ -103,12 +106,6 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
           <button className="primary" onClick={enter}>
             <ScanLine size={18} /> Explore sessions
           </button>
-        </div>
-        <div className="scene-tag">
-          <span className="technical">
-            <Box size={14} /> 3D model
-          </span>
-          <span>Airflow model</span>
         </div>
         <div className="stage-controls">
           {ready ? (
@@ -144,8 +141,7 @@ export function InstrumentRail({ count }: { count?: number }) {
         </div>
         <div>
           <Layers3 size={15} />
-          <span>Sampling</span>
-          <strong>500 points / lap</strong>
+          <strong>500 aligned samples</strong>
         </div>
         <div>
           <span className="square-icon" aria-hidden="true" />

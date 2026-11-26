@@ -1,4 +1,5 @@
 :root {
+  scrollbar-gutter: stable;
   font-family: Barlow, Arial, sans-serif;
   color: #eae9e7;
   background: var(--bg);
@@ -1531,9 +1532,6 @@ thead {
     min-height: 53px;
     font-size: 10px;
   }
-  footer > .shell > span:last-child {
-    display: none;
-  }
   .run-row {
     flex-wrap: wrap;
   }
@@ -1681,7 +1679,9 @@ thead {
   .is-revealing .hero-atmosphere,
   .is-revealing .studio-light {animation: light-up 1.04s .32s ease-out both}
   .is-revealing .stage {animation: unveil .66s .16s var(--ease-studio) both}
-  .is-revealing .hero-copy {animation: panel-settle .60s 2.04s var(--ease-studio) both}
+  .is-revealing .hero-copy > :not(h1) {animation: panel-settle .60s 2.04s var(--ease-studio) both}
+  .is-revealing .hero-copy h1 {animation: ink-start .8s step-end backwards}
+  @keyframes ink-start {from{opacity:0}to{opacity:1}}
   .is-revealing .topbar {animation: light-up .68s .47s ease-out both}
   .is-revealing .scene-tag,
   .is-revealing .stage-controls {animation: panel-settle .54s 2.1s var(--ease-studio) both}
@@ -1860,6 +1860,8 @@ thead {
 }
 
 #main {position:relative}
+html:has(.laboratory[data-flight]){overflow:hidden;overflow-anchor:none}
+.laboratory[data-flight][data-scrolled] .topbar{animation:receive-page 1.42s ease both}
 .studio-layer[hidden]{display:none}
 [data-flight="launch"] .studio-layer{position:absolute;inset:0 0 auto;z-index:4;pointer-events:none}
 .skip-flight{position:absolute;right:4vw;top:16px;z-index:7}
@@ -1871,6 +1873,7 @@ thead {
 [data-flight=launch] .hero-shell{animation:launch-copy .35s ease-in both}
 [data-flight=return] .hero-shell{animation:restore-copy 1.58s ease both}
 [data-flight=launch] .route-body{animation:analysis-arrival 1.58s ease both}
+[data-flight=launch] .route-outgoing{position:absolute;inset-inline:0;z-index:3;pointer-events:none;animation:release-archive 1.58s linear both}
 [data-flight=return] .studio-layer .stage{animation:catch-light 1.58s ease both}
 [data-flight=return] .route-body{animation:restore-copy 1.58s ease both}
 [data-flight=launch] :is(.archive-tools,.card-grid,.pairing){animation:analysis-arrival 1.58s .10s ease backwards}
@@ -1895,13 +1898,13 @@ thead {
 [data-flight=launch] .hero-atmosphere{animation:launch-atmosphere 1.58s linear both}
 @keyframes launch-atmosphere{0%,23%{opacity:1}65%,100%{opacity:0}}
 [data-flight=launch] .stage{left:0;right:0;mask-image:none}
-.circuit-handoff{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:5}
+.circuit-handoff{position:fixed;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none;z-index:5}
 /* The strand endpoints are measured in the settled panel coordinate system. */
 [data-flight] .methodology{animation:none}
 [data-flight=launch] .card-art .outline{animation:outline-arrival 1.58s linear both}
 @keyframes outline-arrival{0%,89%{opacity:0}100%{opacity:1}}
 
-[data-flight=return] .route-body{position:absolute;left:0;right:0;z-index:3;pointer-events:none;animation:release-archive 1.58s linear both}
+[data-flight=return] .route-outgoing{position:absolute;left:0;right:0;z-index:3;pointer-events:none;animation:release-archive 1.58s linear both}
 [data-flight=return] .studio-layer{animation:reacquire-studio 1.58s ease both}
 @keyframes release-archive{0%,12%{opacity:1}46%,100%{opacity:0}}
 @keyframes reacquire-studio{0%,10%{opacity:0}47%,100%{opacity:1}}
@@ -1923,6 +1926,44 @@ thead {
   background:currentColor; opacity:.65; transform-origin:left; transform:rotate(-32deg);
 }
 .part-node::after {content:"+";position:absolute;left:-3px;top:7px;font-size:9px}
-.particle-node {font-size:9px}
+.particle-node {font-size:11px; font-weight:500}
 [data-flight] .studio-node {visibility:hidden}
 @media (prefers-reduced-motion:reduce) { .studio-node {display:none} }
+
+.workspace .workspace-intro h1{font-size:clamp(31px,3.4vw,54px)}
+.workspace-intro{padding-bottom:18px}.workspace .pair-header{margin-top:20px}
+.analysis-grid{display:grid;grid-template-columns:minmax(230px,30%) minmax(0,1fr);gap:clamp(16px,2vw,32px);align-items:start;margin-top:20px}
+.lap-inspector{position:sticky;top:18px;background:var(--glass);border:1px solid var(--line);border-radius:5px;padding:16px;min-width:0}
+.lap-inspector .circuit-view{background:radial-gradient(ellipse at 55% 65%,#22252a,#09090a 74%);box-shadow:none;border:0;margin:-16px -16px 14px;padding:14px;border-bottom:1px solid var(--line)}
+.lap-inspector .circuit-stage{height:clamp(130px,14vw,200px)}
+.lap-position,.lap-metrics,.lap-speeds,.replay-controls,.chart-tools{display:flex;align-items:center;gap:8px}
+.lap-position,.lap-metrics,.lap-speeds{justify-content:space-between}
+.lap-position span,.lap-metrics,.lap-speeds,.plot-note{font:11px/1.5 var(--mono);color:#adb3ba}
+.lap-position strong{font:600 28px var(--display);font-variant-numeric:tabular-nums}
+.lap-position small,.lap-speeds small{font-size:11px}.lap-speeds{border-block:1px solid var(--line);padding:10px 0;margin:12px 0}
+.lap-speeds strong{display:block;font:500 20px var(--display)}
+.lap-ruler{height:8px;margin:10px 2px;position:relative;background:#18191d}.lap-ruler b,.lap-ruler i,.lap-ruler em{position:absolute;top:0;height:100%}.lap-ruler b{background:#414955}.lap-ruler i{width:1px;background:#a1a6ae}.lap-ruler em{top:-3px;width:2px;height:14px;background:#eef5ff;box-shadow:0 0 6px #c5daff85}
+.replay-controls{margin:12px 0 6px}.replay-controls select,.chart-tools button{background:#141517;border:1px solid #34363a;color:#ccd0d5;padding:6px 10px;border-radius:3px;font:12px var(--mono)}
+.chart-tools{flex-wrap:wrap;margin-bottom:6px}.chart-tools button[aria-pressed=true]{border-color:#9cabb9;background:#272d33;color:white}.chart-tools button:last-child{margin-left:auto}
+.trace-stack{min-width:0}.trace-stack .trace{background:linear-gradient(130deg,#151619,#0b0c0e 74%);box-shadow:none}
+.trace-stack .u-over{touch-action:none;cursor:crosshair;overflow:visible}
+.trace-crosshair,.trace-selection{pointer-events:none;position:absolute;top:0;height:100%}.trace-crosshair{width:1px;background:#d3e2f5c4}.trace-selection{background:#8cb3df30}
+.plot:focus-visible{outline:1px solid #84bdec;outline-offset:-2px}
+@media(max-width:760px){.analysis-grid{grid-template-columns:1fr}.lap-inspector{position:static}.lap-inspector .circuit-stage{height:120px}.chart-tools button{padding:8px 11px}}
+.lap-ruler{margin-bottom:21px}
+.lap-ruler span{position:absolute;top:0;height:100%;border-right:1px solid #8b929b;text-align:center;padding-top:9px;color:#a9afb5;font:9px var(--mono)}
+@media (hover:hover) and (prefers-reduced-motion:no-preference){
+  .lap-inspector .circuit-stage .outline{rotate:y var(--inspection-angle,0deg);transition:rotate .18s ease-out}
+}
+.lap-inspector .circuit-stage .lap-xy {rotate:none;transition:none}
+.lap-dots {position:absolute;inset:0;z-index:3;pointer-events:none}
+.lap-dots>* {position:absolute;transform:translate(-50%,-50%);border-radius:50%}
+.lap-dots i {width:16px;height:16px;border:3px solid #72bdff;box-shadow:0 0 6px #72bdff,inset 0 0 3px #72bdff}
+.lap-dots b {width:7px;height:7px;background:#ffb67c;box-shadow:0 0 5px #ffac68,0 0 1px 1px #301e10}
+
+.circuit-modes{display:flex;gap:2px;align-items:center}
+.circuit-modes button{font:10px var(--mono);background:#121316;color:#b9bdc4;border:1px solid transparent;border-radius:3px;padding:5px}
+.circuit-modes .reference{color:#87c7ff}.circuit-modes .compare{color:#ffb67c}
+.circuit-modes button[aria-pressed=true]{border-color:#555b63;background:#24272b}
+.lap-dots i,.lap-dots b{border:0;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e1f1ff,#72bdff 45%,#4086bf);width:10px;height:10px;box-shadow:0 0 5px #72bdff}
+.lap-dots b{width:7px;height:7px;background:radial-gradient(circle at 35% 30%,#ffe4ca,#ffb67c 45%,#d87e42);box-shadow:0 0 4px #ffb67c}

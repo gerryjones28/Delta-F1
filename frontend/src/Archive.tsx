@@ -130,11 +130,11 @@ export function Archive({
   )
   const visible = full ? filtered : filtered?.slice(0, 3)
   return (
-    <section className={'archive shell ' + (full ? 'full-archive' : '')} id="archive">
+    <section className={'archive shell ' + (full ? 'full-archive' : '')}>
       <div className="section-head">
         <div>
           <p className="section-label">
-            <FolderOpen size={14} /> QUALIFYING · MOSTLY 2025
+            <FolderOpen size={14} /> {years.length === 1 ? years[0] + ' Qualifying' : 'Qualifying'}
           </p>
           <h2>
             Sessions<span className="heading-dot">.</span>

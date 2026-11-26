@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef } from 'react'
 import { circuits } from './Archive'
+import { startTypeMotion } from './type-motion'
 
-type Emission = { shot: number; now: number; trails?: number[][][] }
+type Emission = { shot: number; now: number; trails?: number[][][]; ownership:number; dpr:number; receive?:(row:number,points:number[][],opacity:number)=>void }
 
 type Particle = {
   x: number; y: number; vx: number; vy: number
@@ -43,13 +44,33 @@ function panelSides(panel: HTMLElement, rect: DOMRect) {
   })
 }
 
-type ContourGroup = { element: Element; rect: DOMRect; sides: DOMPoint[][]; panel: boolean; info?: Element | null }
+export type ContourGroup = { element: Element; rect: DOMRect; sides: DOMPoint[][]; panel: boolean }
 
-function measurePage(page: Element, includeControls = false) {
+// Keep the actual crossings at the viewport edges, without inventing a border
+// across the clipped portion of a tall panel.
+function visibleArcs(points: DOMPoint[]) {
+  const arcs: DOMPoint[][] = []
+  let arc: DOMPoint[] | undefined
+  for (let i=1; i<points.length; i++) {
+    const a=points[i-1], b=points[i], dy=b.y-a.y
+    if (Math.max(a.y,b.y)<0 || Math.min(a.y,b.y)>innerHeight) { arc=undefined; continue }
+    const edge = (p:DOMPoint) => {
+      if (p.y>=0 && p.y<=innerHeight) return p
+      const y=Math.max(0, Math.min(innerHeight,p.y))
+      return new DOMPoint(a.x+(b.x-a.x)*(y-a.y)/dy,y)
+    }
+    if (!arc) { arc=[edge(a)]; arcs.push(arc) }
+    arc.push(edge(b))
+    if (b.y<0 || b.y>innerHeight) arc=undefined
+  }
+  return arcs
+}
+
+export function measurePage(page: Element, includeControls = false) {
   const groups: ContourGroup[] = []
   function addPanel(panel: HTMLElement) {
     const rect = panel.getBoundingClientRect()
-    if (rect.width && rect.top < innerHeight && rect.bottom > 0)
+    if (rect.width && rect.height && rect.top < innerHeight && rect.bottom > 0)
       groups.push({element:panel, rect, sides:panelSides(panel, rect), panel:true})
   }
   page.querySelectorAll<HTMLElement>('.method-grid article').forEach(addPanel)
@@ -58,7 +79,7 @@ function measurePage(page: Element, includeControls = false) {
     const matrix = outline?.getScreenCTM()
     const circuit = circuits[card.dataset.venue ?? '']
     const rect = card.getBoundingClientRect()
-    if (!outline || !matrix || !circuit) {
+    if (!outline || !matrix || !circuit || !card.closest('.session-card')) {
       // A session without a mapped circuit can still contribute its real card border.
       const panel = includeControls && card.closest<HTMLElement>('.session-card')
       if (panel) addPanel(panel)
@@ -66,12 +87,18 @@ function measurePage(page: Element, includeControls = false) {
     }
     if (rect.top >= innerHeight || rect.bottom < 0) return
     const points = [...circuit.points,circuit.points[0]].map(([x,y]) => new DOMPoint(x,y).matrixTransform(matrix))
-    groups.push({element:outline, rect, sides:[points], panel:false, info:card.parentElement?.querySelector('.card-info')})
+    groups.push({element:outline, rect, sides:[points], panel:false})
   })
   // An empty search or offline archive still has real bordered controls.
+  if (includeControls)
+    page.querySelectorAll<HTMLElement>('.trace,.circuit-view,.timing-panel,.driver-controls,.limitations').forEach(addPanel)
   if (includeControls && !groups.length)
-    page.querySelectorAll<HTMLElement>('.search,.filter,.timing-panel,.driver-controls,.notice').forEach(addPanel)
-  return groups
+    page.querySelectorAll<HTMLElement>('.session-card,.search,.filter,.notice,.loading-view,.pending-card,.empty,.workspace-intro').forEach(addPanel)
+  return groups.filter(group => {
+    if (group.rect.top < 0 || group.rect.bottom > innerHeight)
+      group.sides = group.sides.flatMap(visibleArcs)
+    return group.sides.length > 0
+  })
 }
 
 function wavePhase(u: number, ms: number, i: number, seed: number) {
@@ -86,9 +113,11 @@ function waveY(phase: number, ms: number) {
   return Math.sin(phase)+.37*Math.sin(2.2*phase+ms*.003)
 }
 
-function animateWake(svg: SVGSVGElement, returning: boolean) {
+type InkSample = (x:number,y:number)=>void
+function animateWake(svg: SVGSVGElement, returning: boolean, captured: ContourGroup[], sample:InkSample) {
   const strands: {path: SVGPathElement; particles: Particle[]; lane: number; trail: number; last: number}[] = []
   const arrivals: Animation[] = []
+  const returnWidth = parseFloat(getComputedStyle(svg).strokeWidth)*.77
   let originX = 0, originY = 0, reach = 0
 
   function bind(shot: number, now: number, trailCount: number) {
@@ -104,13 +133,13 @@ function animateWake(svg: SVGSVGElement, returning: boolean) {
       const path = document.createElementNS('http://www.w3.org/2000/svg','path')
       svg.appendChild(path)
       const i = strands.length
-      strands.push({path,particles,lane,trail:(i*3+1)%trailCount,last:0})
+      strands.push({path,particles,lane,trail:(returning ? i : i*3+1)%trailCount,last:0})
       return i
     }
 
     const page = svg.parentElement?.querySelector('.route-body')
     if (!page) return
-    for (const {element, rect, sides, panel, info} of measurePage(page)) {
+    for (const {element, rect, sides, panel} of returning ? captured : measurePage(page,true)) {
       const timings = sides.map((points, side) => {
         const fraction = panel ? (side ? .75 : .25) : .5
         const lane = (rect.left - originX + rect.width*fraction) / origin.width
@@ -122,7 +151,7 @@ function animateWake(svg: SVGSVGElement, returning: boolean) {
       const delay = shot - now + start
       if (panel && !returning) {
         arrivals.push(element.animate([{opacity:0}, {opacity:1}], {
-          delay:delay-210, duration:end-start+305, easing:'ease-out', fill:'both',
+          delay:delay-(element.matches('.method-grid article') ? 440 : 210), duration:end-start+305, easing:'ease-out', fill:'both',
         }))
       }
       const frames = panel
@@ -132,16 +161,15 @@ function animateWake(svg: SVGSVGElement, returning: boolean) {
         delay:panel || returning ? delay : Math.max(0,delay),
         duration:end-start+(returning ? 100 : 145), fill:'both',
       }))
-      if (!returning && info)
-        arrivals.push(info.animate([{opacity:0},{opacity:1}],{delay:Math.max(0,delay)-35,duration:170,fill:'both'}))
     }
   }
   function emit(event: Event) {
-    const {shot,now,trails} = (event as CustomEvent<Emission>).detail
+    const {shot,now,trails,ownership,dpr,receive} = (event as CustomEvent<Emission>).detail
     const elapsed = now - shot
     if (!strands.length && trails) bind(shot,now,trails.length)
     strands.forEach(({path,particles,lane,trail,last},i) => {
       const vertices: string[] = []
+      const screenPoints:number[][] = []
       const lock = captureTime(i,lane)
       // Run the same capture and turbulence envelopes backward. Attachment still uses
       // the current car and camera, so its velocity at the join is the live velocity.
@@ -172,16 +200,39 @@ function animateWake(svg: SVGSVGElement, returning: boolean) {
         const curl=waveX(phase,u,ms,seed)
         const recoilLimit = Math.min(.012, 4/Math.max(1, Math.hypot(p.destX-freeX,p.destY-freeY)))
         const recoil=i%3===1 ? 0 : recoilLimit*Math.sin(Math.PI*smooth((ms-lock+100)/160))
-        const x=freeX+(p.destX-freeX)*(pull+recoil)+slack*curl
-        const y=freeY+(p.destY-freeY)*(pull+recoil)+slack*bend
+        // Zip onto the moving stream from its downstream tip. Once a section
+        // attaches it has the stream's position and velocity on every frame.
+        const attach = returning ? smooth((elapsed-releaseDelay(i,lane)*.35-65-(1-u)*210)/345) : 0
+        const loose = 1-attach
+        let x=freeX+loose*((p.destX-freeX)*(pull+recoil)+slack*curl)
+        let y=freeY+loose*((p.destY-freeY)*(pull+recoil)+slack*bend)
+        if (returning && trails) {
+          // Keep the upstream tail in shot while its downstream end rides the
+          // car. Extend along the inlet tangent, with no kink at the join.
+          const [inlet,next]=trails[trail]
+          const dx=inlet[0]-next[0], dy=inlet[1]-next[1]
+          const length=Math.hypot(dx,dy) || 1
+          const tail=Math.max(0,inlet[0]-innerWidth*.34)*Math.pow(1-u,4)*
+            attach*(1-smooth((elapsed-790)/330))
+          x+=dx/length*tail
+          y+=dy/length*tail
+        }
         vertices.push((j?'L':'M')+x.toFixed(1)+' '+y.toFixed(1))
+        if(j===Math.floor(particles.length/2) || j===0) sample(x+originX,y+originY)
+        if(receive) screenPoints.push([x+originX,y+originY])
       })
       strands[i].last=now
       path.setAttribute('d',vertices.join(' '))
       const outlineMix = returning
         ? smooth((elapsed - releaseDelay(i, lane)) / 100)
         : 1 - smooth((ms - lock) / 145)
-      path.style.opacity=String(smooth((ms-300)/165)*(.52+.25*smooth((ms-630)/180))*outlineMix)
+      const opacity=(.52+.25*smooth((ms-630)/180))*outlineMix
+      if(returning && receive) {
+        const taper=smooth((elapsed-200)/350)
+        path.style.strokeWidth=String(returnWidth+(.88/dpr-returnWidth)*taper)
+        if(i<(trails?.length ?? 0)) receive(trail,screenPoints,opacity)
+        path.style.opacity=String(opacity*(1-ownership))
+      } else path.style.opacity=String(smooth((ms-300)/165)*opacity)
     })
   }
   window.addEventListener('studio-emission',emit)
@@ -200,7 +251,8 @@ function divideContours(groups: ContourGroup[], count: number) {
     const pieces = Math.floor((i+1)*count/contours.length) - Math.floor(i*count/contours.length)
     return Array.from({length:pieces}, (_, j) => {
       const end = points.length-1
-      return points.slice(Math.round(j*end/pieces), Math.round((j+1)*end/pieces)+1)
+      const slice = points.slice(Math.round(j*end/pieces), Math.round((j+1)*end/pieces)+1)
+      return slice.length>=2 ? slice : [pointAt(points,j/pieces),pointAt(points,(j+1)/pieces)]
     })
   })
 }
@@ -211,14 +263,14 @@ function pointAt(points: DOMPoint[], fraction: number) {
   return new DOMPoint(a.x+(b.x-a.x)*(t%1), a.y+(b.y-a.y)*(t%1))
 }
 
-function transferWake(svg: SVGSVGElement, shot: number) {
+function transferWake(svg: SVGSVGElement, shot: number, from: ContourGroup[], sample:InkSample) {
   let frame = 0
   const animations: Animation[] = []
   function begin(now: number) {
     const root = svg.parentElement!
     const outgoing = root.querySelector('.route-outgoing')!
     const incoming = root.querySelector('.route-body')!
-    const from = measurePage(outgoing,true), to = measurePage(incoming,true)
+    const to = measurePage(incoming,true)
     if (!from.length || !to.length) {
       // A lazy comparison view can mount just after the navigation commit.
       if (now-shot < 400) frame = requestAnimationFrame(begin)
@@ -262,6 +314,7 @@ function transferWake(svg: SVGSVGElement, shot: number) {
           const phase = wavePhase(u,ms,i,seed)
           const x = a.x+(b.x-a.x)*t-origin.left + loose*reach*(sign*1.6+waveX(phase,u,ms,seed))
           const y = a.y+(b.y-a.y)*t-origin.top + loose*reach*waveY(phase,ms)
+          if(j===Math.floor(vertices.length/2) || j===0) sample(x+origin.left,y+origin.top)
           return (j?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)
         })
         path.setAttribute('d',d.join(' '))
@@ -280,10 +333,13 @@ function transferWake(svg: SVGSVGElement, shot: number) {
   }
 }
 
-export function WakeHandoff({ direction, start }: { direction: 'launch' | 'return' | 'transfer'; start: number }) {
+export function WakeHandoff({ direction, start, captured }: { direction: 'launch' | 'return' | 'transfer'; start: number; captured: ContourGroup[] }) {
   const layer = useRef<SVGSVGElement>(null)
   useLayoutEffect(() => {
-    return direction === 'transfer' ? transferWake(layer.current!,start) : animateWake(layer.current!,direction === 'return')
-  },[direction,start])
+    const svg=layer.current!
+    const ink=startTypeMotion(svg.parentElement!,direction,start)
+    const stop=direction === 'transfer' ? transferWake(svg,start,captured,ink.sample) : animateWake(svg,direction === 'return',captured,ink.sample)
+    return () => { stop(); ink.finishFlight() }
+  },[direction,start,captured])
   return <svg ref={layer} className="circuit-handoff" fill="none" stroke="#d5dadb" strokeWidth="1.28" strokeLinejoin="round" aria-hidden="true" />
 }

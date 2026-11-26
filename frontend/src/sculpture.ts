@@ -185,7 +185,9 @@ function createStudio(
   road.mesh.receiveShadow = !software
   scene.add(road.mesh)
   const standOff = 9.2
-  let bloom = !software && renderer.extensions.has('EXT_color_buffer_float') ? createStudioBloom(renderer) : undefined
+  const silhouette = new THREE.WebGLRenderTarget(1,1)
+  const matte = new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.DoubleSide})
+  let bloom = !software && renderer.extensions.has('EXT_color_buffer_float') ? createStudioBloom(renderer,silhouette.texture) : undefined
   const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 40)
   const aim = new THREE.Vector3(-0.33, 0.45, 0),
     motion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -214,6 +216,7 @@ function createStudio(
   // Sample only the aft portion of the existing stream tubes. Farther points
   // retain older vehicle positions, stretching a wake out behind the rear wing.
   const aftPaths = airflow.paths.map(path => path.getSpacedPoints(42).slice(-15))
+  const returnPaths = airflow.paths.map(path => path.getSpacedPoints(99))
   const projected = new THREE.Vector3()
   function launchTravel(progress: number) {
     const exit = THREE.MathUtils.smootherstep(progress, .21, .72)
@@ -229,6 +232,7 @@ function createStudio(
     if (width < 1 || height < 1) return
     renderer.setSize(width, height, false)
     bloom?.resize(canvas.width, canvas.height)
+    silhouette.setSize(Math.ceil(canvas.width/2),Math.ceil(canvas.height/2))
     const bounds = host.getBoundingClientRect()
     const shell = lightSurface.getBoundingClientRect()
     const wide = hero?.dataset.flight === 'launch'
@@ -349,25 +353,25 @@ function createStudio(
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
     // Both layers use this render timestamp and the current camera projection.
     const shot = Number(hero?.dataset.flightStart)
+    const ownership = returning ? ease(.24,.34) : 0
+    airflow.beginReturn(returning, returning ? ease(.48,.68) : 1, ownership)
     if ((launching && progress > .19) || returning) {
       let trails: number[][][] | undefined
+      let receive: ((row:number,points:number[][],opacity:number)=>void) | undefined
       if (returning || progress < .53) {
-        // While the car is outside the frame, gather the strands along its approach.
-        // Lead decays to zero before the card strands blend into the actual rear tubes.
-        const lead = returning ? .22 * (1 - ease(.34, .65)) : 0
-        const memory = returning ? .06 * (1 - ease(.51, .70)) : .24
         camera.updateMatrixWorld()
         const bounds = canvas.getBoundingClientRect()
-        trails = aftPaths.map(path => path.map((point,i) => {
+        if(returning) receive=(row,points,opacity)=>airflow.receive(row,points,bounds,opacity)
+        trails = (returning ? returnPaths : aftPaths).map(path => path.map((point,i) => {
           const age = i/(path.length-1)
           projected.copy(point)
-          const sampleTime = progress + lead - age * memory
-          projected.x += returning ? returnTravel(sampleTime) : launchTravel(sampleTime)
+          // Returning tips attach to the vehicle in this frame's camera.
+          projected.x += returning ? airflow.group.position.x : launchTravel(progress-age*.24)
           projected.project(camera)
           return [bounds.left+(1+projected.x)*bounds.width/2, bounds.top+(1-projected.y)*bounds.height/2]
         }))
       }
-      window.dispatchEvent(new CustomEvent('studio-emission', {detail:{shot,now,trails}}))
+      window.dispatchEvent(new CustomEvent('studio-emission', {detail:{shot,now,trails,ownership,receive,dpr}}))
     }
     const started = performance.now()
     shutter.set(0,0)
@@ -387,6 +391,18 @@ function createStudio(
       previousCenter.copy(center)
       previousShot = shot
     }
+    const maskStrength = returning ? 1-ease(.74,.96) : 0
+    if (maskStrength || shutter.lengthSq()>0) {
+      const layers = camera.layers.mask, override = scene.overrideMaterial
+      camera.layers.set(2)
+      scene.overrideMaterial=matte
+      renderer.setRenderTarget(silhouette)
+      renderer.render(scene,camera)
+      scene.overrideMaterial=override
+      camera.layers.mask=layers
+      renderer.setRenderTarget(null)
+    }
+    airflow.setSilhouette(silhouette.texture,maskStrength)
     if (bloom) bloom.render(scene, camera, shutter)
     else renderer.render(scene, camera)
     nodes.update(camera,flowClock,!staticCamera && !direction && shotTime>2.06,airflow.sampleParticle)
@@ -482,6 +498,8 @@ function createStudio(
     airflow.dispose()
     road.dispose()
     bloom?.dispose()
+    silhouette.dispose()
+    matte.dispose()
     rim.shadow.dispose()
     env.dispose()
     renderer.dispose()

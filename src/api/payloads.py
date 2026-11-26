@@ -87,6 +87,7 @@ def _estimated(result: AlignmentResult) -> dict:
         role: {
             "driver_code": channels.driver_code,
             "lap_number": channels.lap_number,
+            "positions": channels.positions,
             "elapsed_s": _rounded(channels.elapsed_s, DISPLAY_DIGITS["elapsed_s"]),
             "speed_kmh": _rounded(channels.speed_kmh, DISPLAY_DIGITS["speed_kmh"]),
             "throttle_pct": _rounded(channels.throttle_pct, 0),

@@ -175,9 +175,14 @@ export function createAirflow(axles: THREE.Vector4) {
   geometry.setIndex(indices)
   geometry.setAttribute('neighbor', new THREE.Float32BufferAttribute(neighbors, 3))
   geometry.setAttribute('flow', new THREE.Float32BufferAttribute(flow, 4))
+  // One viewport-space position per existing ribbon station during a return.
+  const joins = new Float32Array(table.length)
+  const joinTexture = new THREE.DataTexture(joins, samples, paths.length, THREE.RGBAFormat, THREE.FloatType)
+  const join = { active: {value:0}, native: {value:1}, visible: {value:1} }
+  const carMask = {value:null as THREE.Texture | null}, maskStrength = {value:0}
   const uniforms = { uTime: { value: 0 }, uFlutter: { value: 0 }, uViewport: { value: new THREE.Vector2(1,1) }, uReveal: { value: 1 }, uDpr: { value: 1 } }
   const lineMaterial = new THREE.ShaderMaterial({
-    uniforms,
+    uniforms: {...uniforms, uCarMask:carMask, uMaskStrength:maskStrength, uJoin:{value:joinTexture}, uReturning:join.active, uNative:join.native, uVisible:join.visible},
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
@@ -187,16 +192,28 @@ export function createAirflow(axles: THREE.Vector4) {
       uniform vec2 uViewport;
       varying vec2 vFlow;
       varying float vOffset;
+      uniform sampler2D uJoin;
+      uniform float uReturning,uNative,uVisible;
+      varying vec2 vJoin;
       uniform float uTime,uFlutter;
       vec4 projectFlow(vec3 p,float t) {
         float phase=t*16.-uTime*4.8+flow.y*2.4;
         float loose=uFlutter*smoothstep(.15,.84,t);
         p.y+=loose*(.18*sin(phase)+.07*sin(2.2*phase));
         p.z+=loose*.21*cos(phase+.9*sin(5.*t));
-        return projectionMatrix*modelViewMatrix*vec4(p,1.);
+        vec4 clip=projectionMatrix*modelViewMatrix*vec4(p,1.);
+        if(uReturning>.5){
+          vec4 fix=texelFetch(uJoin,ivec2(int(t*${samples-1}.+.5),int(flow.y)),0);
+          if(fix.w>.5){
+            clip.xy=mix(fix.xy*clip.w,clip.xy,uNative);
+            vJoin=vec2((1.-uNative)*fix.z,uVisible);
+          }
+        }
+        return clip;
       }
       void main(){
         vFlow=flow.xy;
+        vJoin=vec2(0.,1.);
         vec4 point=projectFlow(position,flow.x), other=projectFlow(neighbor,flow.w);
         vec2 along=(other.xy*point.w-point.xy*other.w)*uViewport*sign(flow.w-flow.x);
         vec2 normal=vec2(-along.y,along.x)/max(.00001,length(along));
@@ -204,7 +221,11 @@ export function createAirflow(axles: THREE.Vector4) {
         point.xy+=normal*vOffset*2.*point.w/uViewport;
         gl_Position=point;
       }`,
-    fragmentShader: `uniform float uTime,uReveal;
+    fragmentShader: `uniform float uTime,uReveal,uNative;
+      uniform sampler2D uCarMask;
+      uniform vec2 uViewport;
+      uniform float uMaskStrength;
+      varying vec2 vJoin;
       varying vec2 vFlow;
       varying float vOffset;
       void main(){
@@ -215,7 +236,11 @@ export function createAirflow(axles: THREE.Vector4) {
         float alpha=edge*sweep*(.12+.21*pulse)*(.77+.23*cos(vFlow.y*1.3));
         // Pixel coverage of a 0.88-pixel wide strand, centered on the same path.
         float coverage=max(0.,min(.44,vOffset+.5)-max(-.44,vOffset-.5));
-        gl_FragColor=vec4(.69,.75,.78,alpha*coverage);
+        if(vJoin.x>0.) alpha=alpha*uNative+vJoin.x;
+        // Negative-Z lanes run on the far side of the return camera.
+        if(uMaskStrength>0. && vFlow.y<${paths.length/2}.)
+          alpha*=1.-uMaskStrength*texture2D(uCarMask,gl_FragCoord.xy/uViewport).r;
+        gl_FragColor=vec4(.69,.75,.78,alpha*coverage*vJoin.y);
       }`,
   })
   const wires = new THREE.Mesh(geometry, lineMaterial)
@@ -318,6 +343,7 @@ export function createAirflow(axles: THREE.Vector4) {
     })
   }
   function dispose() {
+    joinTexture.dispose()
     geometry.dispose()
     dust.dispose()
     streaks.geometry.dispose()
@@ -341,5 +367,26 @@ export function createAirflow(axles: THREE.Vector4) {
     out.set(coord(0),coord(1),coord(2))
     return t
   }
-  return { group, paths, resize, update, sampleParticle, dispose }
+  function beginReturn(active:boolean, native:number, visible:number) {
+    join.active.value=Number(active)
+    join.native.value=native
+    join.visible.value=visible
+    if(active) { joins.fill(0); joinTexture.needsUpdate=true }
+  }
+  function receive(row:number, points:number[][], bounds:DOMRect, opacity:number) {
+    for(let i=0;i<samples;i++){
+      const t=i/(samples-1)*(points.length-1)
+      const a=points[Math.floor(t)], b=points[Math.ceil(t)]
+      const x=THREE.MathUtils.lerp(a[0],b[0],t%1), y=THREE.MathUtils.lerp(a[1],b[1],t%1)
+      const k=4*(row*samples+i)
+      joins[k]=2*(x-bounds.left)/bounds.width-1
+      joins[k+1]=1-2*(y-bounds.top)/bounds.height
+      joins[k+2]=opacity; joins[k+3]=1
+    }
+  }
+  function setSilhouette(texture:THREE.Texture,strength:number) {
+    carMask.value=texture
+    maskStrength.value=strength
+  }
+  return { group, paths, resize, update, sampleParticle, beginReturn, receive, setSilhouette, dispose }
 }

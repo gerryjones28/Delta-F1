@@ -168,6 +168,7 @@ class AlignedChannels:
     speed_kmh: np.ndarray
     throttle_pct: np.ndarray
     brake: np.ndarray
+    positions: list | None = None
 
 
 @dataclass(frozen=True)
@@ -283,7 +284,7 @@ LAP_SQL = """
 
 SAMPLE_SQL = """
     SELECT t.elapsed_s, t.rel_distance, t.distance_m,
-           t.speed_kmh, t.throttle_pct, t.brake
+           t.speed_kmh, t.throttle_pct, t.brake, t.x, t.y
     FROM telemetry_samples t
     WHERE t.lap_id = %s
     ORDER BY t.sample_index
@@ -344,6 +345,8 @@ def _fetch_samples(conn, lap_id: int) -> dict[str, np.ndarray]:
         name: np.array([_to_float(row[index]) for row in rows], dtype=float)
         for index, name in enumerate(columns)
     }
+    if len(rows[0]) >= 8:
+        series["xy"] = np.asarray([row[6:8] for row in rows], dtype=float)
     return series
 
 
@@ -566,10 +569,23 @@ def _build_result(session: SessionSelector, reference: LapSelector,
 
     def channels(series: dict[str, np.ndarray], mapped: np.ndarray,
                  selector: LapSelector) -> AlignedChannels:
+        times = series["elapsed_s"]
+        aligned_time = np.interp(grid, mapped, times)
+        positions = None
+        if "xy" in series:
+            right = np.searchsorted(times, aligned_time).clip(0, len(times)-1)
+            left = (right-1).clip(0)
+            closest = np.where(aligned_time-times[left] < times[right]-aligned_time, left, right)
+            positions = [
+                series["xy"][j].tolist()
+                if abs(times[j]-t) <= .35 and np.isfinite(series["xy"][j]).all() else None
+                for t, j in zip(aligned_time, closest)
+            ]
         return AlignedChannels(
+            positions=positions,
             driver_code=selector.driver_code,
             lap_number=selector.lap_number,
-            elapsed_s=np.interp(grid, mapped, series["elapsed_s"]),
+            elapsed_s=aligned_time,
             speed_kmh=np.interp(grid, mapped, series["speed_kmh"]),
             throttle_pct=np.interp(grid, mapped, series["throttle_pct"]),
             brake=_step_interp(grid, mapped, series["brake"]),
