@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Volume2, VolumeX } from 'lucide-react'
-import soundtrack from '../_Liminal_ Dark Ambient Music 2025 Deep Soundscape - No Copyright Free Music [FREE FOR PROFIT].mp3?url'
 
 type Cue = 'select' | 'navigate' | 'confirmed'
 
@@ -9,7 +8,7 @@ function createMixer() {
   const master = context.createGain()
   master.gain.value = 0
   master.connect(context.destination)
-  return { context, master, source: null as MediaElementAudioSourceNode | null }
+  return { context, master }
 }
 
 function savedVolume() {
@@ -22,7 +21,6 @@ function savedVolume() {
 }
 
 export function useStudioSound() {
-  const track = useRef<HTMLAudioElement | null>(null)
   const mixer = useRef<ReturnType<typeof createMixer> | null>(null)
   const generation = useRef(0)
   const active = useRef(false)
@@ -32,14 +30,6 @@ export function useStudioSound() {
   const stopPass = useRef<(() => void) | null>(null)
   const [error, setError] = useState(false)
 
-  function music() {
-    if (!track.current) {
-      track.current = new Audio(soundtrack)
-      track.current.loop = true
-      track.current.volume = level.current
-    }
-    return track.current
-  }
   function rememberMuted(muted: boolean) {
     try { localStorage.setItem('delta.muted', String(muted)) } catch { /* Private browsing. */ }
   }
@@ -47,7 +37,6 @@ export function useStudioSound() {
   const cue = useCallback((kind: Cue) => {
     if (!active.current || !level.current) return
     try {
-      // Native autoplay can be allowed before Web Audio. Create the cue bus on demand.
       const bus = mixer.current ??= createMixer()
       if (bus.context.state === 'suspended') void bus.context.resume().catch(() => {})
       bus.master.gain.setTargetAtTime(level.current, bus.context.currentTime, .025)
@@ -69,7 +58,7 @@ export function useStudioSound() {
         oscillator.start(time)
         oscillator.stop(time + 0.15)
       })
-    } catch { /* Music can still play on browsers without a cue bus. */ }
+    } catch { /* Sound effects are optional when Web Audio is unavailable. */ }
   }, [])
 
   const pass = useCallback((returning: boolean) => {
@@ -110,23 +99,10 @@ export function useStudioSound() {
     wind.connect(filter).connect(gain).connect(effects)
     wind.onended=()=>{wind.disconnect();filter.disconnect();gain.disconnect()}
     wind.start(at)
-    // Duck music separately from the cue bus and follow live changes to master volume.
-    const duck = bus.source ? context.createGain() : null
-    if (duck && bus.source) { bus.source.disconnect(); bus.source.connect(duck).connect(master) }
-    function mix() {
-      const t=context.currentTime-start
-      const factor=1-.42*Math.sin(Math.min(1,t/1.58)*Math.PI)**2
-      if (duck) duck.gain.setTargetAtTime(factor,context.currentTime,.025)
-      else if (track.current) track.current.volume=level.current*factor
-    }
-    const timer=window.setInterval(mix,40)
     const stop = () => {
       if (stopPass.current !== stop) return
       stopPass.current=null
-      clearInterval(timer)
       effects.disconnect()
-      if (duck && bus.source) { bus.source.disconnect(); duck.disconnect(); bus.source.connect(master) }
-      else if (track.current) track.current.volume=level.current
     }
     stopPass.current=stop
     return stop
@@ -135,11 +111,9 @@ export function useStudioSound() {
   async function toggle() {
     const ticket = ++generation.current
     setError(false)
-    const audio = music()
     if (active.current) {
       stopPass.current?.()
       active.current = false
-      audio.pause()
       const bus = mixer.current
       if (bus) {
         bus.master.gain.cancelScheduledValues(bus.context.currentTime)
@@ -153,14 +127,9 @@ export function useStudioSound() {
       active.current = true
       setEnabled(true)
       const bus = mixer.current ??= createMixer()
-      // On devices with hardware-only element volume, route music through the gain node.
-      if (!bus.source && Math.abs(audio.volume - level.current) > .001) {
-        bus.source = bus.context.createMediaElementSource(audio)
-        bus.source.connect(bus.master)
-      }
       bus.master.gain.cancelScheduledValues(bus.context.currentTime)
       bus.master.gain.setTargetAtTime(level.current, bus.context.currentTime, .035)
-      await Promise.all([bus.context.resume(), audio.play()])
+      await bus.context.resume()
       if (generation.current === ticket) {
         rememberMuted(false)
         cue('confirmed')
@@ -168,7 +137,6 @@ export function useStudioSound() {
     } catch {
       if (generation.current !== ticket) return
       active.current = false
-      audio.pause()
       setEnabled(false)
       setError(true)
     }
@@ -178,36 +146,18 @@ export function useStudioSound() {
     setVolume(value)
     level.current = value
     const bus = mixer.current
-    if (track.current && !bus?.source) track.current.volume = value
     if (bus && active.current) bus.master.gain.setTargetAtTime(value, bus.context.currentTime, 0.035)
     try { localStorage.setItem('delta.masterVolume', String(value)) } catch { /* Session setting still applies. */ }
   }
   useEffect(() => {
     let muted = false
     try { muted = localStorage.getItem('delta.muted') === 'true' } catch { /* Use the low default. */ }
-    if (!muted && level.current > 0) {
-      const audio = music()
-      const ticket = ++generation.current
-      // A refusal ends this attempt. Only the sound switch can request playback again.
-      if (Math.abs(audio.volume - level.current) < .001) {
-        void audio.play().then(() => {
-          if (generation.current === ticket) {
-            active.current = true
-            setEnabled(true)
-          }
-        }).catch(() => {})
-      }
-    }
+    active.current = !muted
+    setEnabled(!muted)
     return () => {
       stopPass.current?.()
       generation.current++
       active.current = false
-      if (track.current) {
-        track.current.pause()
-        track.current.removeAttribute('src')
-        track.current.load()
-        track.current = null
-      }
       if (mixer.current) void mixer.current.context.close()
       mixer.current = null
     }

@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import { GradientEquirectTexture, WebGLPathTracer } from 'three-gpu-pathtracer'
 import { loadVehicle } from './vehicle'
-import { localVehicle } from './vehicle-source'
 import { studioRig } from './studio-rig'
 
 const status = document.querySelector<HTMLParagraphElement>('#status')!
@@ -25,8 +24,7 @@ async function photograph() {
   renderer.toneMappingExposure = .94
   const width = Math.min(960, Math.round(canvas.clientWidth))
   renderer.setSize(width, Math.round(width/1.88), false)
-  const car = localVehicle ? await loadVehicle(new AbortController().signal, false)
-    : (await import('./procedural-car')).carSculpture()
+  const car = await loadVehicle(new AbortController().signal, false)
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(.0025,.0025,.003)
   const environment = new GradientEquirectTexture(128)

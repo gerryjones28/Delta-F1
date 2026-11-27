@@ -3,7 +3,6 @@ import { createStudioNodes } from './studio-nodes'
 import { createAirflow } from './airflow'
 import { createRollingRoad } from './road'
 import { createStudioBloom } from './studio-bloom'
-import { localVehicle } from './vehicle-source'
 
 import { studioRig } from './studio-rig'
 
@@ -76,9 +75,7 @@ export function mountSculpture(
       try { build() } catch { failed() }
     }, wait)
   }
-  const vehicle = localVehicle
-    ? import('./vehicle').then(module => module.loadVehicle(controller.signal, software))
-    : import('./procedural-car').then(module => module.carSculpture())
+  const vehicle = import('./vehicle').then(module => module.loadVehicle(controller.signal, software))
   vehicle.then(result => {
     if (controller.signal.aborted) {
       disposeVehicle(result)

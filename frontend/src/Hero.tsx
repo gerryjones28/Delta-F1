@@ -76,7 +76,7 @@ export default function Hero({ enter, revealing, skipReveal, visit }: { visit:Ty
           src={studioAsset(revealing && !failed ? (deferred ? 'studio-descent.webp' : 'studio-overhead.webp') : 'sculpture.webp')}
           onError={event => {
             const image = event.currentTarget
-            if (new URL(image.src).pathname.startsWith('/local-vehicle/')) image.src = '/sculpture.webp'
+            if (new URL(image.src).pathname.endsWith('/studio-descent.webp') || new URL(image.src).pathname.endsWith('/studio-overhead.webp')) image.src = '/sculpture.webp'
           }}
           fetchPriority="high"
           alt={ready ? '' : 'Black and pearl-white Formula car under a studio spotlight'}

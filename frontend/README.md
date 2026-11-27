@@ -22,9 +22,9 @@ The dev and preview servers proxy `/api` to `http://127.0.0.1:8000`. To use anot
 
 The control-room sculpture uses a fixed hero angle, damped cursor parallax, reduced-motion support, and a local WebP fallback. Each circuit schematic uses independently projected venue coordinates. Geographic provenance and license terms are in [the circuit data credits](public/licenses/circuits.txt).
 
-Studio sound attempts low-volume playback once, honors a saved mute, and waits for the sound switch if the browser blocks autoplay. The local build includes the supplied *Liminal* MP3. Before public deployment, verify the recording's public-use and redistribution rights with its rights holder and retain the license.
+Studio sound controls the synthesized navigation, interaction, and transition effects. Mute and volume preferences are saved locally.
 
-The local vehicle preview uses Peter Kiss’s F1 2022 Concept car. The supplied download contains no redistribution license document. Confirm the applicable rights for serving a downloadable derivative before public use. The local Vite dev and preview servers serve the GLB and its posters on loopback. The distributable build uses the procedural car outside localhost. [Original model listing](https://www.cgtrader.com/free-3d-models/car/racing-car/f1-2022-concept-car)
+The detailed car is adapted from Peter Kiss?s (peterkissdesign) [F1 2022 Concept car](https://www.cgtrader.com/free-3d-models/car/racing-car/f1-2022-concept-car), used with the creator?s permission for this public, noncommercial Axis F1 portfolio.
 
 The source scene stays intact. To regenerate the optimized local mesh with Blender 4.3, run this from the frontend directory, then restart Vite.
 
