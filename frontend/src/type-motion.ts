@@ -5,7 +5,7 @@ import { createDecoder } from './glyph-decode'
 function makeField(bounds: DOMRect, ink: DOMRect, reverse: boolean, lines: DOMRect[]) {
   const {left,top,width,height}=bounds
   const inkLeft=ink.left, inkTop=ink.top, inkHeight=ink.height
-  const cols=Math.min(192,Math.max(32,Math.ceil(width/2)))
+  const cols=Math.min(matchMedia('(pointer: coarse) and (max-width: 900px)').matches ? 128 : 192,Math.max(32,Math.ceil(width/2)))
   const rows=Math.max(12,Math.min(96,Math.round(cols*height/width)))
   // Write the three mask channels directly. A small uncompressed BMP needs
   // neither a synchronous canvas readback nor PNG encoding on the scroll path.

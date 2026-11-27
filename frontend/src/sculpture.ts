@@ -65,8 +65,10 @@ export function mountSculpture(
     surface.remove()
     onUnavailable?.()
   }
-  const wait = revealStart !== undefined && software
-    ? revealStart + 2840 - performance.now() : 0
+  const smallTouch = matchMedia('(pointer: coarse) and (max-width: 900px)').matches
+  // Let the poster and first text paint before building render targets on touch devices.
+  const wait = revealStart !== undefined && (software || smallTouch)
+    ? revealStart + (software ? 2840 : 280) - performance.now() : 0
   if (wait > 0) {
     onDeferred?.()
     readyToRender = false
@@ -75,7 +77,8 @@ export function mountSculpture(
       try { build() } catch { failed() }
     }, wait)
   }
-  const vehicle = import('./vehicle').then(module => module.loadVehicle(controller.signal, software))
+  // Use the authored LOD of the same vehicle on small touch displays.
+  const vehicle = import('./vehicle').then(module => module.loadVehicle(controller.signal, software || smallTouch))
   vehicle.then(result => {
     if (controller.signal.aborted) {
       disposeVehicle(result)
@@ -138,7 +141,9 @@ function createStudio(
   renderer.shadowMap.autoUpdate = false
   renderer.shadowMap.needsUpdate = !software
   rim.castShadow = !software
-  rim.shadow.mapSize.set(1024, 1024)
+  const smallTouch = matchMedia('(pointer: coarse) and (max-width: 900px)').matches
+  const shadowSize = smallTouch ? 512 : 1024
+  rim.shadow.mapSize.set(shadowSize, shadowSize)
   Object.assign(rim.shadow.camera, { left: -3.8, right: 3.8, top: 3.4, bottom: -3.4, near: 0.2, far: 12 })
   rim.shadow.camera.updateProjectionMatrix()
   rim.shadow.radius = 4
@@ -204,7 +209,7 @@ function createStudio(
   let frameInterval = 1000 / 60 - 1
   let idleMix = 0
   const minDpr = software ? 0.65 : 0.85
-  let dpr = Math.min(window.devicePixelRatio || 1, software ? 0.85 : 1.65)
+  let dpr = Math.min(window.devicePixelRatio || 1, software ? 0.85 : smallTouch ? 1.25 : 1.65)
   renderer.setPixelRatio(dpr)
   let studioWidth = 0, centerShift = 0, launchShift = 0
   const previousCenter = new THREE.Vector3(), center = new THREE.Vector3()
@@ -225,12 +230,14 @@ function createStudio(
     return 10.6 * approach - .15 * Math.sin(Math.PI * settle) ** 2
   }
   function resize() {
-    const { width, height } = host.getBoundingClientRect()
+    const bounds = host.getBoundingClientRect()
+    const { width, height } = bounds
     if (width < 1 || height < 1) return
-    renderer.setSize(width, height, false)
+    if (Math.floor(width*dpr) !== canvas.width || Math.floor(height*dpr) !== canvas.height) {
+      renderer.setSize(width, height, false)
+    }
     bloom?.resize(canvas.width, canvas.height)
     silhouette.setSize(Math.ceil(canvas.width/2),Math.ceil(canvas.height/2))
-    const bounds = host.getBoundingClientRect()
     const shell = lightSurface.getBoundingClientRect()
     const wide = hero?.dataset.flight === 'launch'
     if (!wide || !studioWidth) {
@@ -407,7 +414,11 @@ function createStudio(
       slow++
     else slow = Math.max(0, slow - 1)
     if (slow > 8) {
-      if (bloom || renderer.shadowMap.enabled) {
+      if (smallTouch && dpr > minDpr) {
+        dpr = Math.max(minDpr, dpr - 0.2)
+        renderer.setPixelRatio(dpr)
+        resize()
+      } else if (bloom || renderer.shadowMap.enabled) {
         bloom?.dispose()
         bloom = undefined
         renderer.shadowMap.enabled = false

@@ -39,7 +39,8 @@ function panelSides(panel: HTMLElement, rect: DOMRect) {
     curve.setAttribute('d', `M ${middle} ${top} H ${tangent} A ${radius} ${radius} 0 0 ${sweep} ${edge} ${top+radius}
       V ${bottom-radius} A ${radius} ${radius} 0 0 ${sweep} ${tangent} ${bottom} H ${middle}`)
     const length = curve.getTotalLength()
-    const segments = Math.min(220, Math.max(32, Math.ceil(length / 5)))
+    const spacing = matchMedia('(pointer: coarse) and (max-width: 900px)').matches ? 8 : 5
+    const segments = Math.min(220, Math.max(32, Math.ceil(length / spacing)))
     return Array.from({length:segments+1}, (_, i) => curve.getPointAtLength(i * length / segments))
   })
 }
@@ -76,16 +77,16 @@ export function measurePage(page: Element, includeControls = false) {
   page.querySelectorAll<HTMLElement>('.method-grid article').forEach(addPanel)
   page.querySelectorAll<HTMLElement>('[data-venue]').forEach(card => {
     const outline = card.querySelector<SVGSVGElement>('.outline')
+    const rect = card.getBoundingClientRect()
+    if (rect.top >= innerHeight || rect.bottom < 0) return
     const matrix = outline?.getScreenCTM()
     const circuit = circuits[card.dataset.venue ?? '']
-    const rect = card.getBoundingClientRect()
     if (!outline || !matrix || !circuit || !card.closest('.session-card')) {
       // A session without a mapped circuit can still contribute its real card border.
       const panel = includeControls && card.closest<HTMLElement>('.session-card')
       if (panel) addPanel(panel)
       return
     }
-    if (rect.top >= innerHeight || rect.bottom < 0) return
     const points = [...circuit.points,circuit.points[0]].map(([x,y]) => new DOMPoint(x,y).matrixTransform(matrix))
     groups.push({element:outline, rect, sides:[points], panel:false})
   })

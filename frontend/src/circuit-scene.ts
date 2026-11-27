@@ -97,11 +97,13 @@ export function drawCircuit(host: HTMLElement, points: number[][], map?: LapMap 
 
   let mode: CameraMode='overview'
   let settling=false, enteringMode=false, frame=0, previous=0, height=1
+  let visible=false
   function invalidate() {
-    if(!frame) frame=requestAnimationFrame(draw)
+    if(visible && !document.hidden && !frame) frame=requestAnimationFrame(draw)
   }
   function draw(now:number) {
     frame=0
+    if (!visible || document.hidden) return
     const dt=previous ? Math.min((now-previous)/1000,.05) : 1/60
     previous=now
     let moving=false
@@ -153,7 +155,7 @@ export function drawCircuit(host: HTMLElement, points: number[][], map?: LapMap 
       if(p) orb.position.set(p[0]-90,.4,p[1]-55)
     }
     if(mode!=='overview') settling=true
-    if (playback) {
+    if (playback && visible && !document.hidden) {
       cancelAnimationFrame(frame)
       draw(performance.now())
     } else invalidate()
@@ -192,18 +194,28 @@ export function drawCircuit(host: HTMLElement, points: number[][], map?: LapMap 
   }
   const observer = new ResizeObserver(resize)
   observer.observe(host)
+  const viewport = new IntersectionObserver(([entry])=>{
+    visible=entry.isIntersecting
+    previous=0
+    invalidate()
+  })
+  viewport.observe(host)
+  document.addEventListener('visibilitychange',invalidate)
   resize()
   function dispose() {
     cancelAnimationFrame(frame)
     grid.geometry.dispose();grid.material.dispose()
     haloTexture.dispose();haloMaterials.forEach(mat=>mat.dispose())
     globe.dispose();orbs.forEach(orb=>orb.material.dispose())
+    viewport.disconnect()
+    document.removeEventListener('visibilitychange',invalidate)
     observer.disconnect()
     el.removeEventListener('keydown', key)
     controls.dispose()
     geometry.dispose()
     material.dispose()
     renderer.dispose()
+    renderer.forceContextLoss()
     el.remove()
   }
   return {dispose,setSamples,setMode}

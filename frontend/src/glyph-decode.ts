@@ -8,7 +8,8 @@ export function createDecoder(node: HTMLElement, reverse: boolean) {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const box = frame.getBoundingClientRect()
-  const scale = Math.min(devicePixelRatio, 2)
+  const smallTouch = matchMedia('(pointer: coarse) and (max-width: 900px)').matches
+  const scale = Math.min(devicePixelRatio, smallTouch ? 1.25 : 2)
   canvas.width = Math.ceil(box.width * scale)
   canvas.height = Math.ceil(box.height * scale)
   canvas.setAttribute('aria-hidden','true')
@@ -37,7 +38,7 @@ export function createDecoder(node: HTMLElement, reverse: boolean) {
     const value = run.textContent ?? ''
     for (let i=0;i<value.length;i++) {
       const letter=value[i]
-      if (!/[a-z]/i.test(letter) || random()>(prose ? .10 : hero ? .93 : .72)) continue
+      if (!/[a-z]/i.test(letter) || random()>(prose ? .10 : hero ? .93 : .72)*(smallTouch ? .8 : 1)) continue
       range.setStart(run,i)
       range.setEnd(run,i+1)
       const rect = range.getBoundingClientRect()
@@ -52,7 +53,7 @@ export function createDecoder(node: HTMLElement, reverse: boolean) {
       glyphs.push({x,y,width:rect.width,height:rect.height,baseline:y+(rect.height-ascent-descent)/2+ascent,
         font,color:run.parentElement!.closest('em')?'#b4b5b7':style.color,
         begin,end:begin+(hero ? .25 : prose ? .14 : .20)+random()*.09,
-        phase:random(),rate:hero?15:17,alphabet,code:Math.floor(random()*97),step:-1})
+        phase:random(),rate:smallTouch ? 11 : hero?15:17,alphabet,code:Math.floor(random()*97),step:-1})
     }
   }
   if (!glyphs.length) return
