@@ -1,11 +1,13 @@
 import { InkText } from './InkText'
 import DriverPicker from './DriverPicker'
-﻿import { useEffect, useState } from 'react'
+﻿import { lazy, Suspense, useEffect, useState } from 'react'
 import { Activity, AlertTriangle, ChevronDown, ChevronLeft, Flag, Layers3, Timer } from 'lucide-react'
 import { circuits, SessionFacts } from './Archive'
 import { lapTime, signed, useQuery, type Comparison, type Driver, type Lap, type Session } from './api'
 import CircuitView from './CircuitView'
-import Traces from './Traces'
+
+// The handoff measures this shell on its first frame. Charts load after comparison.
+const Traces = lazy(() => import('./Traces'))
 
 function ErrorLine({ message, retry }: { message: string; retry: () => void }) {
   return (
@@ -154,7 +156,9 @@ function Results({ data, sessionId }: { data: Comparison; sessionId:string }) {
           </p>
         </div>
       )}
-      <Traces data={data} sessionId={sessionId} />
+      <Suspense fallback={<p role="status">Loading telemetry charts…</p>}>
+        <Traces data={data} sessionId={sessionId} />
+      </Suspense>
       <details className="limitations">
         <summary>
           <Layers3 size={16} /> Coverage, uncertainty and limitations

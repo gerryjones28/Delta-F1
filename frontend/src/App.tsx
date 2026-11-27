@@ -1,5 +1,5 @@
 import { InkText } from './InkText'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Activity,
   AudioWaveform,
@@ -19,7 +19,7 @@ import { SoundControls, useStudioSound } from './Sound'
 import { Archive, ConnectionNotice } from './Archive'
 import { useQuery, type Session } from './api'
 
-const Workspace = lazy(() => import('./Workspace'))
+import Workspace from './Workspace'
 function Brand() {
   return (
     <a href="#overview" className="brand" aria-label="Axis F1 home">
@@ -355,9 +355,7 @@ export default function App() {
             ) : page === 'method' ? (
               <Method />
             ) : page.startsWith('session/') && session ? (
-              <Suspense fallback={<p className="shell empty loading-view" role="status">Loading lap comparison…</p>}>
-                <Workspace session={session} cue={cue} />
-              </Suspense>
+              <Workspace session={session} cue={cue} />
             ) : page.startsWith('session/') && !sessions ? (
               <section className="shell archive">
                 {result.error ? (
