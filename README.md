@@ -2,7 +2,7 @@
 
 **[Explore the live website](https://axisf1.app)** ? [GitHub repository](https://github.com/gjones01/AXIS-F1) · Demonstration video coming soon <!-- Replace “Demonstration video coming soon” with [Watch the demonstration](YOUR_YOUTUBE_URL). -->
 
-I built AXIS F1 for the graduate Databases course at New College of Florida in Fall 2026. It brings Formula 1 qualifying results and lap telemetry into one relational database. Pick an event, two drivers, and a lap for each to see where their times diverge and what each driver was doing at that point.
+I built AXIS F1 for a graduate Databases course at New College of Florida in Fall 2026. It brings Formula 1 qualifying results and lap telemetry into one relational database. Pick an event, two drivers, and a lap for each to see where their times diverge and what each driver was doing at that point.
 
 ![AXIS F1 homepage with the animated Formula car and airflow around its bodywork](docs/media/homepage.gif)
 
