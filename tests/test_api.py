@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from src.api import catalog
 from src.api.main import create_app
-from src.load.telemetry_importer import ConfigurationError
+from src.database import ConfigurationError
 
 SPA = "2025-belgian-grand-prix-qualifying"
 AUSTRALIA = "2025-australian-grand-prix-qualifying"

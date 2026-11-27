@@ -27,7 +27,7 @@ from src.analysis.sector_alignment import (
     SessionSelector,
     compare_laps,
 )
-from src.load.telemetry_importer import ConfigurationError
+from src.database import ConfigurationError
 
 SPA = SessionSelector(year=2025, event_name="Belgian Grand Prix")
 ZANDVOORT = SessionSelector(year=2025, event_name="Dutch Grand Prix")

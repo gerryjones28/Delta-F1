@@ -47,7 +47,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from src.load.telemetry_importer import connect, load_database_url
+from src.database import connect, load_database_url
 
 __all__ = [
     "AlignedAxis",
@@ -531,12 +531,13 @@ def compare_laps(
         raise AlignmentError("grid_points must be at least 10")
 
     if database_url is None:
-        database_url, _env = load_database_url()
+        database_url = load_database_url()
 
     conn = connect(database_url)
     try:
         with conn.transaction():
             conn.execute("SET TRANSACTION READ ONLY")
+            conn.execute("SET LOCAL statement_timeout = '15s'")
             lap_ref = _resolve_lap(conn, session, reference)
             lap_cmp = _resolve_lap(conn, session, compare)
             series_ref = _fetch_samples(conn, lap_ref["lap_id"])

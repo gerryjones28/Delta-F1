@@ -37,7 +37,7 @@ from src.analysis.sector_alignment import (
     compare_laps,
 )
 from src.api import catalog, payloads
-from src.load.telemetry_importer import ConfigurationError, redact
+from src.database import ConfigurationError
 
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",     # Vite dev server
@@ -55,7 +55,7 @@ __all__ = ["compare", "create_app", "health", "laps", "sessions", "session_drive
 class LapRef(BaseModel):
     """One lap, identified the way the UI selects it."""
 
-    session_id: str = Field(min_length=3, examples=["2025-belgian-grand-prix-qualifying"])
+    session_id: str = Field(min_length=3, max_length=128, examples=["2025-belgian-grand-prix-qualifying"])
     driver_code: str = Field(min_length=2, max_length=4, examples=["VER"])
     lap_number: int = Field(ge=1, examples=[2])
 
@@ -109,7 +109,7 @@ def create_app(cors_origins: list[str] | None = None) -> FastAPI:
     )
     origins = cors_origins if cors_origins is not None else [
         origin.strip()
-        for origin in os.getenv(CORS_ENV_VAR, ",".join(DEFAULT_CORS_ORIGINS)).split(",")
+        for origin in os.getenv(CORS_ENV_VAR, "" if os.getenv("VERCEL") else ",".join(DEFAULT_CORS_ORIGINS)).split(",")
         if origin.strip()
     ]
     app.add_middleware(
@@ -123,12 +123,12 @@ def create_app(cors_origins: list[str] | None = None) -> FastAPI:
     @app.exception_handler(psycopg.OperationalError)
     async def _database_unavailable(_request, exc):  # pragma: no cover - env dependent
         return JSONResponse(status_code=503,
-                            content={"detail": f"database unavailable: {redact(exc)}"})
+                            content={"detail": "database unavailable"})
 
     @app.exception_handler(ConfigurationError)
     async def _misconfigured(_request, exc):  # pragma: no cover - env dependent
         return JSONResponse(status_code=503,
-                            content={"detail": f"database is not configured: {redact(exc)}"})
+                            content={"detail": "database is not configured"})
 
     @app.get("/api/health")
     def health() -> dict:

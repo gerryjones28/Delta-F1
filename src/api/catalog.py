@@ -19,7 +19,7 @@ from typing import Iterator
 
 import psycopg
 
-from src.load.telemetry_importer import connect, load_database_url
+from src.database import connect, load_database_url
 
 __all__ = [
     "LapRow",
@@ -48,11 +48,12 @@ def slug_for(year: int, event_name: str, session_type: str) -> str:
 @contextmanager
 def read_only_connection() -> Iterator[psycopg.Connection]:
     """One short read-only connection per request; credentials stay server-side."""
-    database_url, _env = load_database_url()
+    database_url = load_database_url()
     conn = connect(database_url)
     try:
         with conn.transaction():
             conn.execute("SET TRANSACTION READ ONLY")
+            conn.execute("SET LOCAL statement_timeout = '15s'")
             yield conn
     finally:
         conn.close()
