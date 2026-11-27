@@ -207,7 +207,7 @@ def test_result_is_json_serialisable(spa) -> None:
     assert len(payload["axis"]["progress"]) == spa.axis.grid_points
     assert set(payload["elapsed"]) == {"reference", "compare"}
     assert set(payload["elapsed"]["reference"]) == {
-        "driver_code", "lap_number", "elapsed_s", "speed_kmh", "throttle_pct", "brake",
+        "driver_code", "lap_number", "elapsed_s", "speed_kmh", "throttle_pct", "brake", "positions", "gear",
     }
     assert payload["samples"][0]["samples"] == 745
     assert payload["uncertainty"]["stated_seconds"] > 0

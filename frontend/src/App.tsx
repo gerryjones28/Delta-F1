@@ -1,3 +1,4 @@
+import { InkText } from './InkText'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   Activity,
@@ -12,7 +13,7 @@ import {
 } from 'lucide-react'
 import { flushSync } from 'react-dom'
 import { WakeHandoff, measurePage, type ContourGroup } from './WakeTransition'
-import { observePageCopy } from './type-motion'
+import { observePageCopy, type TypeVisit } from './type-motion'
 import Hero, { InstrumentRail } from './Hero'
 import { SoundControls, useStudioSound } from './Sound'
 import { Archive, ConnectionNotice } from './Archive'
@@ -21,10 +22,10 @@ import { useQuery, type Session } from './api'
 const Workspace = lazy(() => import('./Workspace'))
 function Brand() {
   return (
-    <a href="#overview" className="brand" aria-label="Delta F1 home">
-      <img src="/delta.svg" alt="" />
+    <a href="#overview" className="brand" aria-label="Axis F1 home">
+      <img src="/axis.svg" alt="" />
       <span>
-        DELTA <b>F1</b>
+        AXIS <b>F1</b>
       </span>
     </a>
   )
@@ -32,29 +33,30 @@ function Brand() {
 function Method() {
   return (
     <section className="shell methodology">
-      <h1>
+      <h1><InkText>
         About the data<span className="heading-dot">.</span>
-      </h1>
+      </InkText></h1>
       <div className="method-grid">
         <article>
           <Flag />
-          <h2>The project</h2>
-          <p>I built Delta F1 for a graduate database project. It combines historical Formula 1 data with telemetry to compare qualifying laps. The database contains selected sessions, mostly from 2025.</p>
+          <h2><InkText>The project</InkText></h2>
+          <p><InkText>I built Axis F1 for a graduate database project. It combines historical Formula 1 data with telemetry to compare qualifying laps. The database contains selected sessions, mostly from 2025.</InkText></p>
         </article>
         <article>
           <ChartNoAxesCombined />
-          <h2>Data sources</h2>
-          <p>F1DB provides historical information about drivers, events, and circuits. OpenF1 provides session and timing data through its API. TracingInsights archives lap telemetry. These sources can share underlying timing and telemetry records.</p>
+          <h2><InkText>Data sources</InkText></h2>
+          <p><InkText>F1DB provides historical information about drivers, events, and circuits. OpenF1 provides session and timing data through its API. TracingInsights archives lap telemetry. These sources can share underlying timing and telemetry records.</InkText></p>
+          <a href="/licenses/driver-portraits.txt" target="_blank" rel="noreferrer">Driver portrait credits</a>
         </article>
         <article>
           <Activity />
-          <h2>How it works</h2>
-          <p>I import the data into PostgreSQL hosted on Supabase. A Python backend built with FastAPI serves the stored records to a React frontend. Three.js renders the car and circuit views. The site shows past sessions and updates only when I import more data.</p>
+          <h2><InkText>How it works</InkText></h2>
+          <p><InkText>I import the data into PostgreSQL hosted on Supabase. A Python backend built with FastAPI serves the stored records to a React frontend. Three.js renders the car and circuit views. The site shows past sessions and updates only when I import more data.</InkText></p>
         </article>
         <article>
           <Layers3 />
-          <h2>What the times mean</h2>
-          <p>Lap and sector times are recorded at timing lines. Between those lines, the charts use telemetry to estimate the time difference. Some laps have gaps or no usable telemetry, so an exact time gain at a corner cannot be read from the charts.</p>
+          <h2><InkText>What the times mean</InkText></h2>
+          <p><InkText>Lap and sector times are recorded at timing lines. Between those lines, the charts use telemetry to estimate the time difference. Some laps have gaps or no usable telemetry, so an exact time gain at a corner cannot be read from the charts.</InkText></p>
           <a href="/licenses/circuits.txt" target="_blank" rel="noreferrer">
             Circuit data credits
           </a>
@@ -70,6 +72,7 @@ export default function App() {
   const sound = useStudioSound()
   const { cue, pass } = sound
   const [route, setRoute] = useState(getRoute)
+  const [typeVisit,setTypeVisit] = useState<TypeVisit>(() => new Map())
   const [revealing, setRevealing] = useState(
     () => getRoute() === 'overview' && !matchMedia('(prefers-reduced-motion: reduce)').matches,
   )
@@ -159,6 +162,7 @@ export default function App() {
           if (next === 'overview') setStudioVisited(true)
           setFlight(cinematic && direction ? {direction, start: performance.now(), source, scroll, sourceTop, captured} : null)
           setRoute(next)
+          setTypeVisit(new Map())
           setMenu(false)
           setStatusOpen(false)
         })
@@ -231,21 +235,21 @@ export default function App() {
   }, [flight, pass])
   const active = route.startsWith('session/') ? 'archive' : route
   useEffect(()=>{
-    if(flight || revealing) return
+    if(flight) return
     const body=document.querySelector('.route-body')
     if(!body) return
     const selector=route.startsWith('session/') ? '.workspace-intro' : '.methodology,.archive'
     const page=body.querySelector(selector)
-    if(page) return observePageCopy(page)
+    if(page) return observePageCopy(page,typeVisit)
     // On a direct session link the workspace can arrive after the route commit.
     let stop:(()=>void) | undefined
     const pending=new MutationObserver(()=>{
       const loaded=body.querySelector(selector)
-      if(loaded) { pending.disconnect(); stop=observePageCopy(loaded) }
+      if(loaded) { pending.disconnect(); stop=observePageCopy(loaded,typeVisit) }
     })
     pending.observe(body,{childList:true,subtree:true})
     return ()=>{pending.disconnect();stop?.()}
-  },[route,flight,revealing])
+  },[route,flight,typeVisit])
   const state = sessions ? 'online' : result.error ? 'offline' : 'connecting'
   const layers = flight ? [flight.source, route] : [route]
   return (
@@ -326,6 +330,7 @@ export default function App() {
       <main id="main" tabIndex={-1}>
         {studioVisited && <div className="studio-layer" style={flight?.direction==='launch' ? {top:-flight.scroll} : undefined} hidden={route !== 'overview' && (!flight || flight.direction === 'transfer')} inert={route !== 'overview' || !!flight}>
             <Hero
+              visit={typeVisit}
               revealing={revealing}
               skipReveal={() => setRevealing(false)}
               enter={() => {
@@ -333,7 +338,7 @@ export default function App() {
               }}
             />
         </div>}
-        {flight && <WakeHandoff key={flight.start} direction={flight.direction} start={flight.start} captured={flight.captured} />}
+        {flight && <WakeHandoff visit={typeVisit} key={flight.start} direction={flight.direction} start={flight.start} captured={flight.captured} />}
         {flight && <button className="skip-flight ghost" type="button" onClick={() => {setFlight(null); document.getElementById('main')?.focus()}}>Skip transition</button>}
         {layers.map(page => {
           const outgoing = flight && page === flight.source
@@ -375,7 +380,7 @@ export default function App() {
       <footer>
         <div className="shell">
           <span>
-            <AudioWaveform size={16} /> DELTA F1
+            <AudioWaveform size={16} /> AXIS F1
           </span>
         </div>
       </footer>

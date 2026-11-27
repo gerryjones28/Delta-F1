@@ -1,4 +1,4 @@
-# Delta F1 Telemetry Laboratory
+# Axis F1 Telemetry Laboratory
 
 From the repository root, start the existing FastAPI service in one PowerShell terminal.
 

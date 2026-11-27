@@ -135,6 +135,10 @@ def test_compare_spa_returns_measured_and_estimated(client) -> None:
         assert len(series["speed_kmh"]) == 500
         assert len(series["throttle_pct"]) == 500
         assert set(series["brake"]) <= {0, 1}
+        assert len(series["gear"]) == 500
+        gears = [gear for gear in series["gear"] if gear is not None]
+        assert all(type(gear) is int for gear in gears)
+        assert len(set(gears)) > 1
     assert estimated["delta_s"][0] == 0.0
 
     assert body["coverage"]["complete_lap"] is True

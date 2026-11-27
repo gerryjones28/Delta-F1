@@ -92,6 +92,7 @@ def _estimated(result: AlignmentResult) -> dict:
             "speed_kmh": _rounded(channels.speed_kmh, DISPLAY_DIGITS["speed_kmh"]),
             "throttle_pct": _rounded(channels.throttle_pct, 0),
             "brake": [int(round(value)) for value in channels.brake],
+            "gear": channels.gear if channels.gear is not None else [None] * len(channels.brake),
         }
         for role, channels in result.elapsed.items()
     }

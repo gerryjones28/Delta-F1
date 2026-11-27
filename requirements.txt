@@ -1,4 +1,4 @@
-# Delta F1 - initial development dependencies
+# Axis F1 - initial development dependencies
 # Install with: .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 # HTTP client for the OpenF1 REST API

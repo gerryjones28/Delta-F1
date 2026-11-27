@@ -27,7 +27,7 @@ export interface LapRef {
   lap_number: number
 }
 export type Pair<T> = { reference: T; compare: T }
-export type Series = { positions?: ([number,number] | null)[] | null; speed_kmh: number[]; throttle_pct: number[]; brake: number[]; elapsed_s: number[] }
+export type Series = { positions?: ([number,number] | null)[] | null; speed_kmh: number[]; throttle_pct: number[]; brake: number[]; gear?: (number | null)[]; elapsed_s: number[] }
 export interface Comparison {
   meta: Pair<LapRef> & { grid_points: number }
   measured: {

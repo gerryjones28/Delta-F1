@@ -1,9 +1,10 @@
+import { InkText } from './InkText'
 import { useEffect, useRef, useState } from 'react'
 import { studioAsset } from './vehicle-source'
-import { startTypeMotion } from './type-motion'
+import { startTypeMotion, type TypeVisit } from './type-motion'
 import { Layers3, ScanLine, Pause, Play } from 'lucide-react'
 
-export default function Hero({ enter, revealing, skipReveal }: { enter: () => void; revealing: boolean; skipReveal: () => void }) {
+export default function Hero({ enter, revealing, skipReveal, visit }: { visit:TypeVisit; enter: () => void; revealing: boolean; skipReveal: () => void }) {
   const host = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -13,8 +14,8 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
   useEffect(() => {
     const hero=host.current?.closest('.hero')
     if(revealing && hero && revealStart!==undefined)
-      return startTypeMotion(hero,'intro',revealStart).dispose
-  },[revealing,revealStart])
+      return startTypeMotion(hero,'intro',revealStart,visit).finishFlight
+  },[revealing,revealStart,visit])
 
   useEffect(() => {
     if (!revealing || ready || failed || revealStart === undefined) return
@@ -66,7 +67,7 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
         <div className="ignition" aria-hidden="true">
           <i />
           <b />
-          <span>DELTA F1</span>
+          <span>AXIS F1</span>
         </div>
       )}
       <div className="stage" data-live={ready}>
@@ -93,13 +94,13 @@ export default function Hero({ enter, revealing, skipReveal }: { enter: () => vo
           <button type="button" className="skip-reveal" onClick={skipReveal}>Skip intro</button>
         )}
         <div className="hero-copy">
-          <h1>
+          <h1><InkText>
             Compare{' '}
             <br />
             <em>
               qualifying laps<span>.</span>
             </em>
-          </h1>
+          </InkText></h1>
           <p className="hero-desc">
             Explore Formula 1 qualifying data and compare drivers using lap times, sector times, speed, throttle, and braking.
           </p>

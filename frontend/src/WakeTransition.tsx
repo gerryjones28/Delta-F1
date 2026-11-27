@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react'
 import { circuits } from './Archive'
-import { startTypeMotion } from './type-motion'
+import { startTypeMotion, type TypeVisit } from './type-motion'
 
 type Emission = { shot: number; now: number; trails?: number[][][]; ownership:number; dpr:number; receive?:(row:number,points:number[][],opacity:number)=>void }
 
@@ -333,13 +333,13 @@ function transferWake(svg: SVGSVGElement, shot: number, from: ContourGroup[], sa
   }
 }
 
-export function WakeHandoff({ direction, start, captured }: { direction: 'launch' | 'return' | 'transfer'; start: number; captured: ContourGroup[] }) {
+export function WakeHandoff({ direction, start, captured, visit }: { visit:TypeVisit; direction: 'launch' | 'return' | 'transfer'; start: number; captured: ContourGroup[] }) {
   const layer = useRef<SVGSVGElement>(null)
   useLayoutEffect(() => {
     const svg=layer.current!
-    const ink=startTypeMotion(svg.parentElement!,direction,start)
+    const ink=startTypeMotion(svg.parentElement!,direction,start,visit)
     const stop=direction === 'transfer' ? transferWake(svg,start,captured,ink.sample) : animateWake(svg,direction === 'return',captured,ink.sample)
     return () => { stop(); ink.finishFlight() }
-  },[direction,start,captured])
+  },[direction,start,captured,visit])
   return <svg ref={layer} className="circuit-handoff" fill="none" stroke="#d5dadb" strokeWidth="1.28" strokeLinejoin="round" aria-hidden="true" />
 }

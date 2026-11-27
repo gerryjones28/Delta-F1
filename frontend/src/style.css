@@ -342,6 +342,9 @@ main:focus {
   font-family: var(--display);
   font-weight: 600;
 }
+.ink-frame,.ink-original {display:block}
+.ink-frame {position:relative}
+.ink-frame > canvas {position:absolute;inset:0;width:100%;height:100%;pointer-events:none;user-select:none}
 .hero h1 em {
   font-style: italic;
   letter-spacing: -0.028em;
@@ -1686,7 +1689,6 @@ thead {
   .is-revealing .scene-tag,
   .is-revealing .stage-controls {animation: panel-settle .54s 2.1s var(--ease-studio) both}
   .is-revealing .instrument,
-  .is-revealing .archive,
   .is-revealing footer {animation: panel-settle .52s 2.16s var(--ease-studio) both}
   @keyframes ignition-line {
     0% {opacity: 0; transform: translate(-50%,-50%) rotate(-9deg) scaleX(.04)}

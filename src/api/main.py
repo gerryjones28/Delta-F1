@@ -46,7 +46,7 @@ DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:3000",
 )
 # Name kept from the earlier project name so existing local setups keep working;
-# only the human-facing brand changed to Delta F1.
+# only the human-facing brand changed to Axis F1.
 CORS_ENV_VAR = "DELTATRACE_CORS_ORIGINS"
 
 __all__ = ["compare", "create_app", "health", "laps", "sessions", "session_drivers"]
@@ -103,7 +103,7 @@ def _lap_or_error(conn, session: catalog.SessionRef, lap: LapRef) -> dict:
 def create_app(cors_origins: list[str] | None = None) -> FastAPI:
     """Build the application; origins default to the local dev servers."""
     app = FastAPI(
-        title="Delta F1 API",
+        title="Axis F1 API",
         version="0.1.0",
         summary="Read-only lap telemetry comparison backed by Supabase PostgreSQL",
     )

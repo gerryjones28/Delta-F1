@@ -1,4 +1,4 @@
-"""PostgreSQL connection smoke test for the Delta F1 database.
+"""PostgreSQL connection smoke test for the Axis F1 database.
 
 Read-only: connect, read ``current_database()`` and six row counts, compare them
 with the counts produced by the manual inserts. The connection string is never

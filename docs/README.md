@@ -1,6 +1,6 @@
 # Documentation
 
-Working notes for Delta F1. The database design is being researched
+Working notes for Axis F1. The database design is being researched
 independently, so nothing here prescribes tables, keys or relationships yet.
 
 | File | Purpose |

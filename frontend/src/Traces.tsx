@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { Play, Pause, RotateCcw } from 'lucide-react'
@@ -15,6 +15,7 @@ const channels = [
   { key: 'speed_kmh', label: 'Speed', unit: 'km/h' },
   { key: 'throttle_pct', label: 'Throttle', unit: '%' },
   { key: 'brake', label: 'Brake', unit: '0 / 1' },
+  { key: 'gear', label: 'Gear', unit: '' },
   { key: 'delta_s', label: 'Estimated time difference', unit: 's' },
 ] as const
 type Channel = (typeof channels)[number]
@@ -39,19 +40,23 @@ function Trace({
   current.current = index
   const { estimated, meta } = data
   const isDelta = channel.key === 'delta_s'
-  const a = channel.key === 'delta_s' ? estimated.delta_s : estimated.series.reference[channel.key]
-  const b = channel.key === 'delta_s' ? undefined : estimated.series.compare[channel.key]
+  const missing = useMemo(() => Array<null>(estimated.axis.progress.length).fill(null), [estimated.axis])
+  const a = isDelta ? estimated.delta_s : estimated.series.reference[channel.key] ?? missing
+  const b = isDelta ? undefined : estimated.series.compare[channel.key] ?? missing
   useLayoutEffect(() => {
     const el = host.current
     if (!el) return
     const x = estimated.axis.progress.map((p) => p * 100)
+    const gears = channel.key === 'gear' ? [...a, ...(b ?? [])].filter((g): g is number => g !== null) : []
+    const lowGear = Math.min(1, ...gears), highGear = Math.max(8, ...gears)
     const fixedY =
+      channel.key === 'gear' ? [lowGear - 0.3, highGear + 0.3] :
       channel.key === 'brake' ? [-0.1, 1.1] : channel.key === 'throttle_pct' ? [-5, 105] : undefined
     const style = (stroke: string): uPlot.Series => ({
       stroke,
       width: 1.65,
       points: { show: false },
-      paths: channel.key === 'brake' ? uPlot.paths.stepped?.({ align: 1 }) : undefined,
+      paths: channel.key === 'brake' || channel.key === 'gear' ? uPlot.paths.stepped?.({ align: 1 }) : undefined,
     })
     const chart = new uPlot(
       {
@@ -80,6 +85,7 @@ function Trace({
             grid: { stroke: '#252d38', width: 1 },
             ticks: { show: false },
             splits:
+              channel.key === 'gear' ? () => Array.from({ length: highGear - lowGear + 1 }, (_, i) => lowGear + i) :
               channel.key === 'brake'
                 ? () => [0, 1]
                 : channel.key === 'throttle_pct'
@@ -160,14 +166,14 @@ function Trace({
         </h3>
         <div className="trace-values">
           {isDelta ? (
-            <span>Δ {signed(a[index])} s</span>
+            <span>Δ {signed(estimated.delta_s[index])} s</span>
           ) : (
             <>
               <span className="ref">
-                {readoutLabel('reference')} {a[index]}
+                {readoutLabel('reference')} {a[index] ?? '—'}
               </span>
               <span className="cmp">
-                {readoutLabel('compare')} {b![index]}
+                {readoutLabel('compare')} {b![index] ?? '—'}
               </span>
             </>
           )}

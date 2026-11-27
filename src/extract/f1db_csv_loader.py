@@ -2,7 +2,7 @@
 
 F1DB (https://github.com/f1db/f1db) publishes historical Formula 1 data as CSV
 files. This module deliberately does **not** download anything and does not know
-which files matter for Delta F1: it only lists and loads CSVs from a directory
+which files matter for Axis F1: it only lists and loads CSVs from a directory
 you provide.
 
 Directory resolution order for every function:

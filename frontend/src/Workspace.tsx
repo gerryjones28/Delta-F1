@@ -1,3 +1,5 @@
+import { InkText } from './InkText'
+import DriverPicker from './DriverPicker'
 ﻿import { useEffect, useState } from 'react'
 import { Activity, AlertTriangle, ChevronDown, ChevronLeft, Flag, Layers3, Timer } from 'lucide-react'
 import { circuits, SessionFacts } from './Archive'
@@ -53,20 +55,7 @@ function DriverControls({
         <i />
         {side} lap
       </legend>
-      <label>
-        Driver
-        <div className="select-wrap">
-          <select aria-label={side + ' driver'} value={code} onChange={(e) => setCode(e.target.value)}>
-            {!drivers.length && <option value="">No drivers available</option>}
-            {drivers.map((d) => (
-              <option key={d.driver_code} value={d.driver_code}>
-                {d.driver_code} · {d.full_name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown />
-        </div>
-      </label>
+      <DriverPicker side={side} drivers={drivers} code={code} onChange={setCode} />
       <label>
         Qualifying lap
         <div className="select-wrap">
@@ -246,10 +235,10 @@ export default function Workspace({ session, cue }: { session: Session; cue: (ty
           <p className="section-label">
             <Flag size={14} /> {session.year} / {session.session_type.toUpperCase()}
           </p>
-          <h1>
+          <h1><InkText>
             {session.event_name}
             <span className="heading-dot">.</span>
-          </h1>
+          </InkText></h1>
           {circuits[session.id] && (
             <p className="venue">
               {circuits[session.id].name} · {circuits[session.id].locality}

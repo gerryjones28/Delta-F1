@@ -1,3 +1,4 @@
+import { InkText } from './InkText'
 ﻿import { useState } from 'react'
 import {
   Activity,
@@ -88,7 +89,7 @@ function SessionCard({ session }: { session: Session }) {
           <span className="quali-dot" />
           {session.session_type} <i /> {session.year}
         </div>
-        <h3>{session.event_name}</h3>
+        <h3><InkText>{session.event_name}</InkText></h3>
         {circuit && <p>{circuit.name}</p>}
         <div className="card-stats">
           <span>
@@ -136,9 +137,9 @@ export function Archive({
           <p className="section-label">
             <FolderOpen size={14} /> {years.length === 1 ? years[0] + ' Qualifying' : 'Qualifying'}
           </p>
-          <h2>
+          <h2><InkText>
             Sessions<span className="heading-dot">.</span>
-          </h2>
+          </InkText></h2>
         </div>
         {!full ? (
           <a className="ghost" href="#archive">

@@ -1,4 +1,4 @@
-"""Delta F1 source package.
+"""Axis F1 source package.
 
 Pipeline layout (populated as the project grows):
 

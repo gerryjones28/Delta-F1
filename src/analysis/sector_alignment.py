@@ -169,6 +169,7 @@ class AlignedChannels:
     throttle_pct: np.ndarray
     brake: np.ndarray
     positions: list | None = None
+    gear: list[int | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -284,7 +285,7 @@ LAP_SQL = """
 
 SAMPLE_SQL = """
     SELECT t.elapsed_s, t.rel_distance, t.distance_m,
-           t.speed_kmh, t.throttle_pct, t.brake, t.x, t.y
+           t.speed_kmh, t.throttle_pct, t.brake, t.x, t.y, t.gear
     FROM telemetry_samples t
     WHERE t.lap_id = %s
     ORDER BY t.sample_index
@@ -347,6 +348,8 @@ def _fetch_samples(conn, lap_id: int) -> dict[str, np.ndarray]:
     }
     if len(rows[0]) >= 8:
         series["xy"] = np.asarray([row[6:8] for row in rows], dtype=float)
+    if len(rows[0]) >= 9:
+        series["gear"] = np.asarray([row[8] for row in rows], dtype=float)
     return series
 
 
@@ -589,6 +592,9 @@ def _build_result(session: SessionSelector, reference: LapSelector,
             speed_kmh=np.interp(grid, mapped, series["speed_kmh"]),
             throttle_pct=np.interp(grid, mapped, series["throttle_pct"]),
             brake=_step_interp(grid, mapped, series["brake"]),
+            gear=([int(g) if np.isfinite(g) else None
+                   for g in _step_interp(grid, mapped, series["gear"])]
+                  if "gear" in series else None),
         )
 
     elapsed = {"reference": channels(series_ref, s_ref, reference),
